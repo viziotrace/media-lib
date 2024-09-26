@@ -1,0 +1,7 @@
+[package]
+name = "media-types"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+stabby = "36.1.1"

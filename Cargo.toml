@@ -1,2 +1,2 @@
 [workspace]
-members = [ "crates/media-client","crates/media-lib"]
+members = [ "crates/media-client","crates/media-lib", "crates/media-types"]

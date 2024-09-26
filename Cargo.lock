@@ -194,12 +194,26 @@ dependencies = [
 [[package]]
 name = "media-client"
 version = "0.1.0"
+dependencies = [
+ "libloading",
+ "media-lib",
+ "media-types",
+ "stabby",
+]
 
 [[package]]
 name = "media-lib"
 version = "0.1.0"
 dependencies = [
  "ffmpeg-next",
+ "media-types",
+ "stabby",
+]
+
+[[package]]
+name = "media-types"
+version = "0.1.0"
+dependencies = [
  "stabby",
 ]
 

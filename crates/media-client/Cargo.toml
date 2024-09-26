@@ -3,4 +3,12 @@ name = "media-client"
 version = "0.1.0"
 edition = "2021"
 
+[dev-dependencies]
+# media-lib dependency specificed here for testing purposes.
+# In production the idea is that the media-lib crate would be precompiled and
+media-lib = { path = "../media-lib" }
+
 [dependencies]
+libloading = "0.8.5"
+stabby = { version = "36.1.1", features = ["default", "libloading"] }
+media-types = { path = "../media-types" }

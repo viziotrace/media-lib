@@ -9,3 +9,4 @@ crate-type = ["cdylib"]
 [dependencies]
 ffmpeg-next = { version = "7.0.4", features = ["default", "build"] }
 stabby = { version = "36.1.1", features = ["default", "libloading"] }
+media-types = { path = "../media-types" }
