@@ -1,0 +1,7 @@
+[package]
+name = "media-bin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+media-client = { path = "../media-client" }

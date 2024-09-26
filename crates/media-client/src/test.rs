@@ -1,7 +1,7 @@
+use std::env;
+
 #[cfg(test)]
 pub(crate) fn target_dir() -> std::path::PathBuf {
-    use std::env;
-
     let current_dir = env::current_dir().expect("Failed to get current directory");
     let target_dir = current_dir
         .ancestors()
@@ -9,6 +9,18 @@ pub(crate) fn target_dir() -> std::path::PathBuf {
         .expect("Failed to go up two directories")
         .join("target")
         .join("debug");
+
+    target_dir
+}
+
+#[cfg(test)]
+pub(crate) fn get_test_data_dir() -> std::path::PathBuf {
+    let current_dir = env::current_dir().expect("Failed to get current directory");
+    let target_dir = current_dir
+        .ancestors()
+        .nth(2)
+        .expect("Failed to go up two directories")
+        .join("data");
 
     target_dir
 }
@@ -37,4 +49,10 @@ pub(crate) fn get_media_client_lib() -> std::path::PathBuf {
         full_path
     );
     full_path
+}
+
+#[cfg(test)]
+pub(crate) fn get_test_data_file(file_name: &str) -> std::path::PathBuf {
+    let test_data_dir = get_test_data_dir();
+    test_data_dir.join(file_name)
 }
