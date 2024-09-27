@@ -4,6 +4,7 @@ use media_types::{MediaKeyFrameIterator, MediaLibError, MediaLibInit};
 use stabby::libloading::StabbyLibrary;
 
 mod test;
+pub use media_types;
 
 #[derive(Debug)]
 pub enum MediaClientError {
@@ -41,12 +42,28 @@ impl std::fmt::Display for MediaClientError {
 impl std::error::Error for MediaClientError {}
 
 pub struct MediaClient {
-    pub get_key_frames: extern "C" fn(
+    pub(crate) get_key_frames_ffi: extern "C" fn(
         stabby::string::String,
     ) -> stabby::result::Result<
         stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>),
         MediaLibError,
     >,
+}
+
+impl MediaClient {
+    pub fn get_key_frames(
+        &self,
+        input: &str,
+    ) -> Result<stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>), MediaClientError>
+    {
+        let input_str = stabby::string::String::from(input);
+        let key_frame_interface = (self.get_key_frames_ffi)(input_str);
+        let out = key_frame_interface.match_owned(
+            |key_frame_iter| std::result::Result::Ok(key_frame_iter),
+            |e| std::result::Result::Err(MediaClientError::MediaLibError(e)),
+        );
+        out
+    }
 }
 
 pub fn load(lib: &PathBuf) -> Result<MediaClient, MediaClientError> {
@@ -60,10 +77,10 @@ pub fn load(lib: &PathBuf) -> Result<MediaClient, MediaClientError> {
             )
     }?;
 
-    let result = init_media_lib();
-    if result.is_err() {
-        return Err(MediaClientError::MediaLibError(result.err().unwrap()));
-    }
+    init_media_lib().match_owned(
+        |init| std::result::Result::Ok(init),
+        |e| std::result::Result::Err(MediaClientError::MediaLibError(e)),
+    )?;
 
     let get_key_frames = unsafe {
         library.get_stabbied::<extern "C" fn(
@@ -75,7 +92,9 @@ pub fn load(lib: &PathBuf) -> Result<MediaClient, MediaClientError> {
     }?
     .to_owned();
 
-    Ok(MediaClient { get_key_frames })
+    Ok(MediaClient {
+        get_key_frames_ffi: get_key_frames,
+    })
 }
 
 #[cfg(test)]
@@ -85,18 +104,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_can_load_lib() {
+    fn it_can_get_key_frames() {
         let lib = test::get_media_client_lib();
         let client = load(&lib).unwrap();
 
         // Load the test movie file
         let test_movie = test::get_test_data_file("test.mp4");
 
-        // Convert the PathBuf to a stabby::string::String
-        let test_movie_path = stabby::string::String::from(test_movie.to_str().unwrap());
-
         // Call get_key_frames with the test movie path
-        let key_frames_result = (client.get_key_frames)(test_movie_path);
+        let key_frames_result = client.get_key_frames(test_movie.to_str().unwrap());
 
         // Assert that the result is Ok
         assert!(key_frames_result.is_ok(), "Failed to get key frames");
@@ -126,8 +142,7 @@ mod tests {
             if frame.is_none() {
                 break;
             }
-            let frame = frame.unwrap().unwrap();
-            println!("Frame size: {}", frame.len());
+            frame.unwrap().unwrap();
         }
     }
 }

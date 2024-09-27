@@ -1,3 +1,5 @@
 /target
 /data/*
+/output/*
 !/data/.gitkeep
+!/output/.gitkeep

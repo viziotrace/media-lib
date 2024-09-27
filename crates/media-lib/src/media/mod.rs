@@ -4,6 +4,7 @@ use ffmpeg::media::Type;
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
+use std::io::Cursor;
 use std::path::Path;
 
 pub struct KeyframeIterator {
@@ -96,12 +97,23 @@ impl KeyframeIterator {
                     let width = rgb_frame.width();
                     let height = rgb_frame.height();
                     let buffer = rgb_frame.data(0);
-                    let img_result = image::RgbImage::from_vec(width, height, buffer.to_vec());
+                    let img_result = image::RgbaImage::from_vec(width, height, buffer.to_vec());
                     let img = img_result
                         .ok_or_else(|| MediaLibError::ImageError("Failed to create image".into()));
 
                     match img {
-                        Ok(img) => Some(Ok(img.to_vec())),
+                        Ok(img) => {
+                            let mut png_buffer: Vec<u8> = Vec::new();
+                            let mut cursor = Cursor::new(&mut png_buffer);
+                            match img.write_to(&mut cursor, image::ImageFormat::Png) {
+                                Ok(_) => Some(Ok(png_buffer)),
+                                Err(e) => {
+                                    return Some(Err(MediaLibError::ImageError(
+                                        e.to_string().into(),
+                                    )))
+                                }
+                            }
+                        }
                         Err(e) => Some(Err(e)),
                     }
                 } else {
