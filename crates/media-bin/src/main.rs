@@ -53,7 +53,7 @@ fn main() {
                     break;
                 }
                 let frame = frame.unwrap().unwrap();
-                let output_path = Path::new(&output_dir).join(format!("{}.png", i));
+                let output_path = Path::new(&output_dir).join(format!("{}.jpeg", i));
                 fs::write(output_path, frame).expect("Failed to write frame to output file");
                 i += 1;
             }

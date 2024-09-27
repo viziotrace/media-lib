@@ -4,8 +4,9 @@ use ffmpeg::media::Type;
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
-use std::io::Cursor;
 use std::path::Path;
+
+const NEED_MORE_DATA: i32 = 35;
 
 pub struct KeyframeIterator {
     ictx: ffmpeg::format::context::Input,
@@ -19,9 +20,29 @@ pub struct KeyframeIterator {
 
 type Item = Result<Vec<u8>, MediaLibError>;
 
+fn get_jpeg_buffer(slice: &[u8], width: u32, height: u32) -> Result<Vec<u8>, MediaLibError> {
+    std::panic::catch_unwind(|| {
+        let mut comp = mozjpeg::Compress::new(mozjpeg::ColorSpace::JCS_EXT_RGBA);
+
+        comp.set_size(width as usize, height as usize);
+        let mut comp = comp
+            .start_compress(Vec::new())
+            .map_err(|e| MediaLibError::ImageError(e.to_string().into()))?; // any io::Write will work
+
+        // replace with your image data
+        comp.write_scanlines(&slice)
+            .map_err(|e| MediaLibError::ImageError(e.to_string().into()))?;
+
+        let writer = comp
+            .finish()
+            .map_err(|e| MediaLibError::ImageError(e.to_string().into()))?;
+        Ok(writer)
+    })
+    .map_err(|e| MediaLibError::UnknownError(format!("Panic in get_jpeg_buffer: {:?}", e).into()))?
+}
+
 impl KeyframeIterator {
     pub fn new(input_path: &Path) -> Result<Self, MediaLibError> {
-        ffmpeg::init().map_err(|e| MediaLibError::FFmpegError(e.to_string().into()))?;
         let ictx =
             input(input_path).map_err(|e| MediaLibError::FFmpegError(e.to_string().into()))?;
         let input = ictx
@@ -97,27 +118,21 @@ impl KeyframeIterator {
                     let width = rgb_frame.width();
                     let height = rgb_frame.height();
                     let buffer = rgb_frame.data(0);
-                    let img_result = image::RgbaImage::from_vec(width, height, buffer.to_vec());
-                    let img = img_result
-                        .ok_or_else(|| MediaLibError::ImageError("Failed to create image".into()));
+                    let jpeg_buffer = get_jpeg_buffer(buffer, width, height);
 
-                    match img {
-                        Ok(img) => {
-                            let mut png_buffer: Vec<u8> = Vec::new();
-                            let mut cursor = Cursor::new(&mut png_buffer);
-                            match img.write_to(&mut cursor, image::ImageFormat::Png) {
-                                Ok(_) => Some(Ok(png_buffer)),
-                                Err(e) => {
-                                    return Some(Err(MediaLibError::ImageError(
-                                        e.to_string().into(),
-                                    )))
-                                }
-                            }
-                        }
+                    match jpeg_buffer {
+                        Ok(img) => Some(Ok(img)),
                         Err(e) => Some(Err(e)),
                     }
                 } else {
                     self.get()
+                }
+            }
+            Err(ffmpeg::Error::Other { errno }) => {
+                if errno == NEED_MORE_DATA {
+                    self.get()
+                } else {
+                    Some(Err(MediaLibError::FFmpegError(errno.to_string().into())))
                 }
             }
             Err(ffmpeg::Error::Eof) => None,

@@ -11,3 +11,4 @@ ffmpeg-next = { version = "7.0.4", features = ["default", "build"] }
 stabby = { version = "36.1.1", features = ["default", "libloading"] }
 media-types = { path = "../media-types" }
 image = { version = "0.25.2", features = ["png"] }
+mozjpeg = "0.10.10"
