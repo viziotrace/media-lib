@@ -7,8 +7,21 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-ffmpeg-next = { version = "7.0.4", features = ["default", "build"] }
+ffmpeg-next = { git = "https://github.com/viziotrace/rust-ffmpeg", branch = "hardware-accelerated", features = [
+    "default",
+    "build",
+    "static",
+] }
 stabby = { version = "36.1.1", features = ["default", "libloading"] }
 media-types = { path = "../media-types" }
 image = { version = "0.25.2", features = ["png"] }
 mozjpeg = "0.10.10"
+
+[features]
+default = []
+videotoolbox = ["ffmpeg-next/build-videotoolbox"]
+vulkan = ["ffmpeg-next/build-vulkan"]
+nvdec = ["ffmpeg-next/build-nvdec"]
+
+[patch.crates-io]
+ffmpeg-next-sys = { git = "https://github.com/viziotrace/rust-ffmpeg-sys", branch = "hardware-acceleration" }

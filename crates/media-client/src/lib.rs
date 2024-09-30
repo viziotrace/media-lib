@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use media_types::{MediaKeyFrameIterator, MediaLibError, MediaLibInit};
 use stabby::libloading::StabbyLibrary;
 
+#[cfg(test)]
 mod test;
 pub use media_types;
 

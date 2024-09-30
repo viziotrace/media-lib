@@ -394,9 +394,8 @@ dependencies = [
 
 [[package]]
 name = "ffmpeg-next"
-version = "7.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19a340e3d664ad5f530147cd6d4a86ece739a829fe2d81c369389ef903bd96f6"
+version = "7.1.0"
+source = "git+https://github.com/viziotrace/rust-ffmpeg?branch=hardware-accelerated#f0041029065f365034ebe7a0cc88bff068c363cd"
 dependencies = [
  "bitflags 2.6.0",
  "ffmpeg-sys-next",
@@ -406,8 +405,7 @@ dependencies = [
 [[package]]
 name = "ffmpeg-sys-next"
 version = "7.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc33ac996bad6d164a08069a1e9b3370045860dba3d315acda09420f1febef9e"
+source = "git+https://github.com/viziotrace/rust-ffmpeg-sys?branch=hardware-accelerated#63c65e4dc6d3bc75c2af0ac67e5bf7cb33b9075f"
 dependencies = [
  "bindgen",
  "cc",

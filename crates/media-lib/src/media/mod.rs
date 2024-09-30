@@ -1,12 +1,52 @@
 use crate::MediaLibError;
+use ffmpeg::ffi::{AVCodecHWConfig, AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX};
 use ffmpeg::format::{input, Pixel};
 use ffmpeg::media::Type;
 use ffmpeg::software::scaling::{context::Context, flag::Flags};
 use ffmpeg::util::frame::video::Video;
-use ffmpeg_next as ffmpeg;
+use ffmpeg_next::decoder::Decoder;
+use ffmpeg_next::ffi::avcodec_get_hw_config;
+use ffmpeg_next::{self as ffmpeg, Codec};
 use std::path::Path;
 
 const NEED_MORE_DATA: i32 = 35;
+
+unsafe fn configure_hardware_acceleration(decoder: &mut Decoder) -> Result<(), MediaLibError> {
+    use ffmpeg_next::ffi::{av_hwdevice_iterate_types, AVHWDeviceType};
+
+    let mut device_type = AVHWDeviceType::AV_HWDEVICE_TYPE_NONE;
+    loop {
+        device_type = av_hwdevice_iterate_types(device_type);
+        println!("device_type: {:?}", device_type);
+        if device_type == AVHWDeviceType::AV_HWDEVICE_TYPE_NONE {
+            break;
+        }
+        println!("Available hardware device type: {:?}", device_type);
+    }
+
+    let codec = decoder
+        .codec()
+        .ok_or_else(|| MediaLibError::FFmpegError("Failed to get codec".into()))?;
+    let mut i = 0;
+    loop {
+        let hw_config = avcodec_get_hw_config(codec.as_ptr(), i);
+        if hw_config.is_null() {
+            println!("hw_config is null");
+            break;
+        }
+        if (*hw_config).methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX as i32 != 0 {
+            // Hardware acceleration is supported
+            println!("Hardware acceleration is supported");
+            println!("hw_config: {:?}", (*hw_config).methods);
+            println!("hw_config: {:?}", (*hw_config).device_type);
+            return Ok(());
+        }
+        i += 1;
+    }
+    Err(MediaLibError::FFmpegError(
+        "No hardware acceleration support found".into(),
+    ))
+}
 
 pub struct KeyframeIterator {
     ictx: ffmpeg::format::context::Input,
@@ -51,12 +91,18 @@ impl KeyframeIterator {
             .ok_or_else(|| MediaLibError::FFmpegError("No video stream found".into()))?;
         let video_stream_index = input.index();
 
-        let context_decoder = ffmpeg::codec::context::Context::from_parameters(input.parameters())
-            .map_err(|e| MediaLibError::FFmpegError(e.to_string().into()))?;
-        let decoder = context_decoder
+        let mut context_decoder =
+            ffmpeg::codec::context::Context::from_parameters(input.parameters())
+                .map_err(|e| MediaLibError::FFmpegError(e.to_string().into()))?;
+
+        let mut decoder = context_decoder
             .decoder()
             .video()
             .map_err(|e| MediaLibError::FFmpegError(e.to_string().into()))?;
+
+        unsafe {
+            configure_hardware_acceleration(&mut decoder)?;
+        }
 
         let target_height = 360;
         let aspect_ratio = decoder.width() as f32 / decoder.height() as f32;
