@@ -88,24 +88,16 @@ impl KeyframeIterator {
     pub fn get(&mut self) -> Option<Item> {
         let result = self.video_decoder.get_frame()?;
         match result {
-            Ok(decoded) => {
-                println!(
-                    "nutbar formats check {:?} == {:?}",
-                    decoded.format(),
-                    self.video_decoder.format()
-                );
-
-                match self.run_scaler(&decoded) {
-                    Ok(rgb_frame) => {
-                        let width = rgb_frame.width();
-                        let height = rgb_frame.height();
-                        let buffer = rgb_frame.data(0);
-                        let jpeg_buffer = get_jpeg_buffer(buffer, width, height);
-                        Some(jpeg_buffer)
-                    }
-                    Err(e) => Some(Err(MediaLibError::FFmpegError(e.to_string().into()))),
+            Ok(decoded) => match self.run_scaler(&decoded) {
+                Ok(rgb_frame) => {
+                    let width = rgb_frame.width();
+                    let height = rgb_frame.height();
+                    let buffer = rgb_frame.data(0);
+                    let jpeg_buffer = get_jpeg_buffer(buffer, width, height);
+                    Some(jpeg_buffer)
                 }
-            }
+                Err(e) => Some(Err(MediaLibError::FFmpegError(e.to_string().into()))),
+            },
             Err(e) => Some(Err(MediaLibError::FFmpegError(e.to_string().into()))),
         }
     }
