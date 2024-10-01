@@ -93,6 +93,9 @@ pub fn load(lib: &PathBuf) -> Result<MediaClient, MediaClientError> {
     }?
     .to_owned();
 
+    let init_logging = unsafe { library.get_stabbied::<extern "C" fn()>(b"init_logging") }?;
+    init_logging();
+
     Ok(MediaClient {
         get_key_frames_ffi: get_key_frames,
     })

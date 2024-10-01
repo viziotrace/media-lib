@@ -64,3 +64,11 @@ pub fn get_key_frames(
     let wrapper = MediaKeyFrameIteratorWrapper { iterator };
     Ok(stabby::boxed::Box::new(wrapper).into()).into()
 }
+
+#[stabby::stabby]
+#[stabby::export]
+pub fn init_logging() {
+    let log_level = ffmpeg::util::log::Level::Info;
+    ffmpeg::util::log::set_level(log_level);
+    pretty_env_logger::init();
+}
