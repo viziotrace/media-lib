@@ -24,6 +24,3 @@ default = []
 videotoolbox = ["ffmpeg-next/build-videotoolbox"]
 vulkan = ["ffmpeg-next/build-vulkan"]
 nvdec = ["ffmpeg-next/build-nvdec"]
-
-[patch.crates-io]
-ffmpeg-next-sys = { git = "https://github.com/viziotrace/rust-ffmpeg-sys", branch = "hardware-acceleration" }

@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
+use libloading::Library;
 use media_types::{MediaKeyFrameIterator, MediaLibError, MediaLibInit};
-use stabby::libloading::StabbyLibrary;
+use stabby::libloading::{StabbyLibrary, Symbol};
 
 #[cfg(test)]
 mod test;
@@ -43,12 +44,7 @@ impl std::fmt::Display for MediaClientError {
 impl std::error::Error for MediaClientError {}
 
 pub struct MediaClient {
-    pub(crate) get_key_frames_ffi: extern "C" fn(
-        stabby::string::String,
-    ) -> stabby::result::Result<
-        stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>),
-        MediaLibError,
-    >,
+    library: Library,
 }
 
 impl MediaClient {
@@ -57,8 +53,18 @@ impl MediaClient {
         input: &str,
     ) -> Result<stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>), MediaClientError>
     {
+        let get_key_frames = unsafe {
+            self.library.get_stabbied::<extern "C" fn(
+                stabby::string::String,
+            ) -> stabby::result::Result<
+                stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>),
+                MediaLibError,
+            >>(b"get_key_frames")
+        }
+        .map_err(|e| MediaClientError::UnknownError(e.to_string()))?;
+
         let input_str = stabby::string::String::from(input);
-        let key_frame_interface = (self.get_key_frames_ffi)(input_str);
+        let key_frame_interface = (get_key_frames)(input_str);
         let out = key_frame_interface.match_owned(
             |key_frame_iter| std::result::Result::Ok(key_frame_iter),
             |e| std::result::Result::Err(MediaClientError::MediaLibError(e)),
@@ -83,22 +89,10 @@ pub fn load(lib: &PathBuf) -> Result<MediaClient, MediaClientError> {
         |e| std::result::Result::Err(MediaClientError::MediaLibError(e)),
     )?;
 
-    let get_key_frames = unsafe {
-        library.get_stabbied::<extern "C" fn(
-            stabby::string::String,
-        ) -> stabby::result::Result<
-            stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>),
-            MediaLibError,
-        >>(b"get_key_frames")
-    }?
-    .to_owned();
-
     let init_logging = unsafe { library.get_stabbied::<extern "C" fn()>(b"init_logging") }?;
     init_logging();
 
-    Ok(MediaClient {
-        get_key_frames_ffi: get_key_frames,
-    })
+    Ok(MediaClient { library: library })
 }
 
 #[cfg(test)]
