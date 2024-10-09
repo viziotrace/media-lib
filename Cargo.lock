@@ -408,7 +408,7 @@ dependencies = [
 [[package]]
 name = "ffmpeg-next"
 version = "7.1.0"
-source = "git+https://github.com/viziotrace/rust-ffmpeg?branch=hardware-accelerated#ad21b6998fb35c08fc5a758dfa1983169552d078"
+source = "git+https://github.com/viziotrace/rust-ffmpeg?rev=47504bd7dc8e886e2519ce997b7e3e526ddfded7#47504bd7dc8e886e2519ce997b7e3e526ddfded7"
 dependencies = [
  "bitflags 2.6.0",
  "ffmpeg-sys-next",
@@ -418,7 +418,7 @@ dependencies = [
 [[package]]
 name = "ffmpeg-sys-next"
 version = "7.0.3"
-source = "git+https://github.com/viziotrace/rust-ffmpeg-sys?branch=hardware-accelerated-nvdec#7c7b404d4c08e31001fd2a51379fa4830688d335"
+source = "git+https://github.com/viziotrace/rust-ffmpeg-sys?rev=acb1ca9691a09663054c4e958e370e61f131b801#acb1ca9691a09663054c4e958e370e61f131b801"
 dependencies = [
  "bindgen",
  "cc",

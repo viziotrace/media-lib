@@ -7,10 +7,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-ffmpeg-next = { git = "https://github.com/viziotrace/rust-ffmpeg", branch = "hardware-accelerated", features = [
-    "default",
-    "build",
-    "static",
+ffmpeg-next = { git = "https://github.com/viziotrace/rust-ffmpeg", rev = "47504bd7dc8e886e2519ce997b7e3e526ddfded7", features = [
+  "default",
+  "build",
+  "static",
 ] }
 stabby = { version = "36.1.1", features = ["default", "libloading"] }
 media-types = { path = "../media-types" }
@@ -22,5 +22,5 @@ pretty_env_logger = "0.5.0"
 [features]
 default = []
 videotoolbox = ["ffmpeg-next/build-videotoolbox"]
-vulkan = ["ffmpeg-next/build-vulkan"]
+d3d12va = ["ffmpeg-next/build-d3d12va"]
 nvdec = ["ffmpeg-next/build-nvdec"]
