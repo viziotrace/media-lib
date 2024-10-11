@@ -38,7 +38,7 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-toolchain
+          install: mingw-w64-x86_64-toolchain mingw-w64-x86_64-rust
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -49,9 +49,13 @@ jobs:
 
       - name: Run tests
         shell: msys2 {0}
-        run: cargo build && cargo test
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          cargo build && cargo test
 
       - name: Build release
         shell: msys2 {0}
         # d3d12va is required for hardware acceleration on Windows
-        run: cargo build --release --features d3d12va
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          cargo build --release --features d3d12va
