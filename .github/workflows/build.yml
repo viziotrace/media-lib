@@ -108,6 +108,7 @@ jobs:
         shell: msys2 {0}
         run: |
           pacman -S --noconfirm git
+          pacman -S --noconfirm yasm
 
       - name: Download test video
         shell: powershell
