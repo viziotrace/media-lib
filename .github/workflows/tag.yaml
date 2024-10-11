@@ -117,6 +117,8 @@ jobs:
 
   create-release:
     needs: [build-macos-intel, build-macos-arm, build-windows]
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Download macOS Intel artifact
