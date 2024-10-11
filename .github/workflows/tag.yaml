@@ -107,7 +107,7 @@ jobs:
       - name: Zip shared library
         run: |
           cd target/release
-          Compress-Archive -Path libmedia_lib.dll -DestinationPath libmedia_lib_windows.zip
+          Compress-Archive -Path media_lib.dll -DestinationPath libmedia_lib_windows.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
