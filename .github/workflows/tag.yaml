@@ -3,7 +3,7 @@ name: Build and Release on Tag
 on:
   push:
     tags:
-      - "*"
+      - "v*"
 
 jobs:
   build-macos-intel:
@@ -114,3 +114,32 @@ jobs:
         with:
           name: libmedia_lib_windows
           path: target/release/libmedia_lib_windows.zip
+
+  create-release:
+    needs: [build-macos-intel, build-macos-arm, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS Intel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libmedia_lib_macos_intel
+
+      - name: Download macOS ARM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libmedia_lib_macos_arm
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libmedia_lib_windows
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            libmedia_lib_macos_intel.zip
+            libmedia_lib_macos_arm.zip
+            libmedia_lib_windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
