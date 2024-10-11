@@ -32,7 +32,7 @@ jobs:
           zip libmedia_lib_macos_intel.zip libmedia_lib.dylib
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: libmedia_lib_macos_intel
           path: target/release/libmedia_lib_macos_intel.zip
@@ -63,7 +63,7 @@ jobs:
           zip libmedia_lib_macos_arm.zip libmedia_lib.dylib
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: libmedia_lib_macos_arm
           path: target/release/libmedia_lib_macos_arm.zip
@@ -110,7 +110,7 @@ jobs:
           Compress-Archive -Path libmedia_lib.dll -DestinationPath libmedia_lib_windows.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: libmedia_lib_windows
           path: target/release/libmedia_lib_windows.zip
