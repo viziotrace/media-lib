@@ -80,6 +80,7 @@ jobs:
         env:
           MSYSTEM: MINGW64
         run: |
+          which sh
           cargo build && cargo test
 
       - name: Build release
