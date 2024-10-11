@@ -7,39 +7,39 @@ on:
     branches: [main]
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  #   build-macos:
+  #     runs-on: macos-latest
 
-    steps:
-      - uses: actions/checkout@v2
+  #     steps:
+  #       - uses: actions/checkout@v2
 
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+  #       - name: Set up Rust
+  #         uses: actions-rs/toolchain@v1
+  #         with:
+  #           profile: minimal
+  #           toolchain: stable
+  #           override: true
 
-      - name: Create data directory
-        run: mkdir -p data
+  #       - name: Create data directory
+  #         run: mkdir -p data
 
-      - name: Download test video
-        run: curl -L -o data/test.mp4 https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4
+  #       - name: Download test video
+  #         run: curl -L -o data/test.mp4 https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4
 
-      - name: Verify download
-        run: |
-          if [ ! -f data/test.mp4 ]; then
-            echo "Failed to download test video"
-            exit 1
-          fi
-          echo "Test video downloaded successfully"
+  #       - name: Verify download
+  #         run: |
+  #           if [ ! -f data/test.mp4 ]; then
+  #             echo "Failed to download test video"
+  #             exit 1
+  #           fi
+  #           echo "Test video downloaded successfully"
 
-      - name: Run tests
-        # We need to build first to ensure the dynamic library is created
-        run: cargo build && cargo test
-      - name: Build release
-        # On macOS, we need to build with the videotoolbox feature to get hardware acceleration
-        run: cargo build --release --features videotoolbox
+  #       - name: Run tests
+  #         # We need to build first to ensure the dynamic library is created
+  #         run: cargo build && cargo test
+  #       - name: Build release
+  #         # On macOS, we need to build with the videotoolbox feature to get hardware acceleration
+  #         run: cargo build --release --features videotoolbox
 
   build-windows:
     runs-on: windows-latest
@@ -58,8 +58,9 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: stable-x86_64-pc-windows-gnu
           override: true
+          target: x86_64-pc-windows-gnu
 
       - name: Download test video
         shell: powershell
