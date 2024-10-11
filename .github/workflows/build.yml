@@ -1,0 +1,28 @@
+name: Build on macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Build release
+        # On macOS, we need to build with the videotoolbox feature to get hardware acceleration
+        run: cargo build --release --features videotoolbox
+
+      - name: Run tests
+        run: cargo test --verbose
