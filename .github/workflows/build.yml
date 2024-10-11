@@ -1,0 +1,143 @@
+name: Build on macOS and Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-macos-intel:
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Install yasm
+        run: brew install yasm
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Download test video
+        run: curl -L -o data/test.mp4 https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4
+
+      - name: Verify download
+        run: |
+          if [ ! -f data/test.mp4 ]; then
+            echo "Failed to download test video"
+            exit 1
+          fi
+          echo "Test video downloaded successfully"
+
+      - name: Run tests
+        # We need to build first to ensure the dynamic library is created
+        run: cargo build && cargo test
+
+      - name: Build release
+        # On macOS, we need to build with the videotoolbox feature to get hardware acceleration
+        run: cargo build --release --features videotoolbox
+
+  build-macos-arm:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Install yasm
+        run: brew install yasm
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Download test video
+        run: curl -L -o data/test.mp4 https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4
+
+      - name: Verify download
+        run: |
+          if [ ! -f data/test.mp4 ]; then
+            echo "Failed to download test video"
+            exit 1
+          fi
+          echo "Test video downloaded successfully"
+
+      - name: Run tests
+        # We need to build first to ensure the dynamic library is created
+        run: cargo build && cargo test
+
+      - name: Build release
+        # On macOS, we need to build with the videotoolbox feature to get hardware acceleration
+        run: cargo build --release --features videotoolbox
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-toolchain mingw-w64-x86_64-rust
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable-x86_64-pc-windows-gnu
+          override: true
+          target: x86_64-pc-windows-gnu
+
+      - name: Install Git
+        shell: msys2 {0}
+        run: |
+          pacman -S --noconfirm git
+          pacman -S --noconfirm yasm
+          pacman -S --noconfirm make
+
+      - name: Download test video
+        shell: powershell
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4" -OutFile "data\test.mp4"
+
+      - name: Verify download
+        shell: powershell
+        run: |
+          if (-not (Test-Path "data\test.mp4")) {
+            Write-Error "Failed to download test video"
+            exit 1
+          }
+          Write-Output "Test video downloaded successfully"
+
+      - name: Run tests
+        shell: msys2 {0}
+        env:
+          MSYSTEM: MINGW64
+        run: |
+          which sh
+          cargo build && cargo test
+
+      - name: Build release
+        shell: msys2 {0}
+        env:
+          MSYSTEM: MINGW64
+        # d3d12va is required for hardware acceleration on Windows
+        run: |
+          cargo build --release --features d3d12va
