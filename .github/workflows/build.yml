@@ -109,6 +109,7 @@ jobs:
         run: |
           pacman -S --noconfirm git
           pacman -S --noconfirm yasm
+          pacman -S --noconfirm make
 
       - name: Download test video
         shell: powershell
