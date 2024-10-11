@@ -20,6 +20,9 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Install yasm
+        run: brew install yasm
+
       - name: Create data directory
         run: mkdir -p data
 
@@ -36,7 +39,7 @@ jobs:
 
       - name: Run tests
         # We need to build first to ensure the dynamic library is created
-        run: cargo build --features videotoolbox && cargo test --features videotoolbox
+        run: cargo build && cargo test
 
       - name: Build release
         # On macOS, we need to build with the videotoolbox feature to get hardware acceleration
@@ -55,6 +58,9 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Install yasm
+        run: brew install yasm
+
       - name: Create data directory
         run: mkdir -p data
 
@@ -71,7 +77,7 @@ jobs:
 
       - name: Run tests
         # We need to build first to ensure the dynamic library is created
-        run: cargo build --features videotoolbox && cargo test --features videotoolbox
+        run: cargo build && cargo test
 
       - name: Build release
         # On macOS, we need to build with the videotoolbox feature to get hardware acceleration
@@ -124,7 +130,7 @@ jobs:
           MSYSTEM: MINGW64
         run: |
           which sh
-          cargo build --verbose --features d3d12va && cargo test --features d3d12va --verbose
+          cargo build && cargo test
 
       - name: Build release
         shell: msys2 {0}
