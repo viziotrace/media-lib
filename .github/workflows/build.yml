@@ -98,6 +98,11 @@ jobs:
           override: true
           target: x86_64-pc-windows-gnu
 
+      - name: Install Git
+        shell: msys2 {0}
+        run: |
+          pacman -S --noconfirm git
+
       - name: Download test video
         shell: powershell
         run: |
