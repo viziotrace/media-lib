@@ -700,6 +700,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "media-client",
+ "mozjpeg",
 ]
 
 [[package]]
@@ -720,7 +721,6 @@ dependencies = [
  "image",
  "log",
  "media-types",
- "mozjpeg",
  "pretty_env_logger",
  "stabby",
 ]

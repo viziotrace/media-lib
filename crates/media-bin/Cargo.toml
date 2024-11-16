@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.18", features = ["default", "derive"] }
 media-client = { path = "../media-client" }
+mozjpeg = "0.10.10"

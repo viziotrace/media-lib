@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use libloading::Library;
-use media_types::{MediaKeyFrameIterator, MediaLibError, MediaLibInit};
-use stabby::libloading::{StabbyLibrary, Symbol};
+use media_types::{MediaFrameDecoder, MediaFrameDecoderOptions, MediaLibError, MediaLibInit};
+use stabby::libloading::StabbyLibrary;
 
 #[cfg(test)]
 mod test;
@@ -48,28 +48,28 @@ pub struct MediaClient {
 }
 
 impl MediaClient {
-    pub fn get_key_frames(
+    pub fn new_frame_decoder(
         &self,
         input: &str,
-    ) -> Result<stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>), MediaClientError>
-    {
-        let get_key_frames = unsafe {
+        options: MediaFrameDecoderOptions,
+    ) -> Result<stabby::dynptr!(stabby::boxed::Box<dyn MediaFrameDecoder>), MediaClientError> {
+        let new_frame_decoder = unsafe {
             self.library.get_stabbied::<extern "C" fn(
                 stabby::string::String,
+                MediaFrameDecoderOptions,
             ) -> stabby::result::Result<
-                stabby::dynptr!(stabby::boxed::Box<dyn MediaKeyFrameIterator>),
+                stabby::dynptr!(stabby::boxed::Box<dyn MediaFrameDecoder>),
                 MediaLibError,
-            >>(b"get_key_frames")
+            >>(b"new_frame_decoder")
         }
         .map_err(|e| MediaClientError::UnknownError(e.to_string()))?;
 
         let input_str = stabby::string::String::from(input);
-        let key_frame_interface = (get_key_frames)(input_str);
-        let out = key_frame_interface.match_owned(
-            |key_frame_iter| std::result::Result::Ok(key_frame_iter),
+        let decoder = (new_frame_decoder)(input_str, options);
+        decoder.match_owned(
+            |decoder| std::result::Result::Ok(decoder),
             |e| std::result::Result::Err(MediaClientError::MediaLibError(e)),
-        );
-        out
+        )
     }
 }
 
@@ -97,50 +97,48 @@ pub fn load(lib: &PathBuf) -> Result<MediaClient, MediaClientError> {
 
 #[cfg(test)]
 mod tests {
-    use media_types::MediaKeyFrameIteratorDynMut;
-
     use super::*;
+    use media_types::{MediaFrameDecoderDynMut, VideoFrameDyn};
 
     #[test]
-    fn it_can_get_key_frames() {
+    fn it_can_decode_frames() {
         let lib = test::get_media_client_lib();
         let client = load(&lib).unwrap();
 
         // Load the test movie file
         let test_movie = test::get_test_data_file("test.mp4");
 
-        // Call get_key_frames with the test movie path
-        let key_frames_result = client.get_key_frames(test_movie.to_str().unwrap());
+        // Create frame decoder
+        let mut decoder = client
+            .new_frame_decoder(
+                test_movie.to_str().unwrap(),
+                MediaFrameDecoderOptions {
+                    target_size: media_types::VideoSize::P240,
+                },
+            )
+            .unwrap();
 
-        // Assert that the result is Ok
-        assert!(key_frames_result.is_ok(), "Failed to get key frames");
+        // Get first frame to verify it works
+        let first_frame = decoder.get_frame();
+        assert!(first_frame.is_some(), "No frames found in test video");
 
-        // Unwrap the result to get the MediaKeyFrameIterator
-        let mut key_frame_iterator = key_frames_result.unwrap();
+        // check that frame has correct dimensions
+        let first_frame = first_frame.unwrap();
+        let frame = first_frame.unwrap();
+        assert_eq!(frame.get_width(), 426);
+        assert_eq!(frame.get_height(), 240);
 
-        // Get the first key frame to ensure it works
-        let first_frame = key_frame_iterator.get_keyframe();
-        assert!(
-            first_frame.is_some(),
-            "No key frames found in the test video"
-        );
-
-        assert!(
-            first_frame.unwrap().unwrap().len() > 0,
-            "No key frames found in the test video"
-        );
-
-        // Check the dimensions
-        let width = key_frame_iterator.get_width();
-        let height = key_frame_iterator.get_height();
-        assert!(width > 0 && height > 0, "Invalid frame dimensions");
-
+        let mut frame_count = 1;
+        // Read remaining frames
         loop {
-            let frame = key_frame_iterator.get_keyframe();
+            let frame = decoder.get_frame();
             if frame.is_none() {
                 break;
             }
+            println!("Decoded {} frames", frame_count);
             frame.unwrap().unwrap();
+            frame_count += 1;
         }
+        assert!(frame_count > 0, "No frames decoded from test video");
     }
 }

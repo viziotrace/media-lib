@@ -15,12 +15,11 @@ ffmpeg-next = { git = "https://github.com/viziotrace/rust-ffmpeg", rev = "47504b
 stabby = { version = "36.1.1", features = ["default", "libloading"] }
 media-types = { path = "../media-types" }
 image = { version = "0.25.2", features = ["png"] }
-mozjpeg = "0.10.10"
 log = "0.4.22"
 pretty_env_logger = "0.5.0"
 
 [features]
-default = []
+default = ["videotoolbox"]
 videotoolbox = ["ffmpeg-next/build-videotoolbox"]
 d3d12va = ["ffmpeg-next/build-d3d12va"]
 nvdec = ["ffmpeg-next/build-nvdec"]
