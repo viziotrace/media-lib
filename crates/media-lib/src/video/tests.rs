@@ -28,7 +28,7 @@ mod tests {
                         // Verify dimensions match requested size
                         assert_eq!(
                             first_frame_dimensions.unwrap(),
-                            VideoSize::P720.dimensions(),
+                            VideoSize::P240.dimensions(),
                             "Frame dimensions don't match requested size"
                         );
                     }

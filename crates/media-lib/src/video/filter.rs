@@ -1,12 +1,13 @@
 use super::hardware::HardwareContext;
 use super::types::VideoSize;
 use ffmpeg_next::ffi::{
-    av_buffer_ref, av_buffersink_get_frame, av_buffersrc_add_frame_flags,
-    av_buffersrc_parameters_alloc, av_buffersrc_parameters_set, av_free, avfilter_graph_alloc,
-    avfilter_graph_alloc_filter, avfilter_graph_config, avfilter_graph_create_filter,
-    avfilter_graph_free, avfilter_graph_parse2, avfilter_init_str, avfilter_link, AVFilterContext,
-    AVFilterGraph,
+    av_buffer_ref, av_buffer_unref, av_buffersink_get_frame, av_buffersrc_add_frame_flags,
+    av_buffersrc_parameters_alloc, av_buffersrc_parameters_set, av_free, av_hwframe_ctx_alloc,
+    av_hwframe_ctx_init, avfilter_graph_alloc, avfilter_graph_alloc_filter, avfilter_graph_config,
+    avfilter_graph_create_filter, avfilter_graph_free, avfilter_graph_parse2, avfilter_init_str,
+    avfilter_link, AVFilterContext, AVFilterGraph, AVHWFramesContext, AVPixelFormat,
 };
+use image::buffer;
 use media_types::MediaLibError;
 use std::ffi::CString;
 use std::ptr::{null, null_mut};
@@ -165,6 +166,31 @@ impl FilterGraph {
             ));
         }
 
+        // Create hardware frames context for buffer source
+        let mut hw_frames_ctx = av_hwframe_ctx_alloc(hw_context.as_ptr());
+        if hw_frames_ctx.is_null() {
+            return Err(MediaLibError::FFmpegError(
+                "Failed to allocate hardware frames context".into(),
+            ));
+        }
+
+        // Configure the hardware frames context
+        let frames_ctx = (*hw_frames_ctx).data as *mut AVHWFramesContext;
+        (*frames_ctx).format = pix_fmt;
+        // XXX: This is a hack to get the correct format for the hardware frames context. This was tested on videotoolbox and should likely be something else or dynamicly picked.
+        (*frames_ctx).sw_format = AVPixelFormat::AV_PIX_FMT_NV12;
+        (*frames_ctx).width = width as i32;
+        (*frames_ctx).height = height as i32;
+
+        // Initialize the hardware frames context
+        let ret = av_hwframe_ctx_init(hw_frames_ctx);
+        if ret < 0 {
+            av_buffer_unref(&mut hw_frames_ctx);
+            return Err(MediaLibError::FFmpegError(
+                "Failed to initialize hardware frames context".into(),
+            ));
+        }
+
         // Allocate and initialize buffer source parameters
         let params = ffmpeg_next::ffi::av_buffersrc_parameters_alloc();
         if params.is_null() {
@@ -173,7 +199,9 @@ impl FilterGraph {
             ));
         }
 
+        println!("hw_frames_ctx: {:?}", pix_fmt);
         // Set the parameters
+        (*params).hw_frames_ctx = hw_frames_ctx;
         (*params).format = pix_fmt as i32;
         (*params).time_base = ffmpeg_next::ffi::AVRational {
             num: time_base.numerator(),
@@ -181,7 +209,6 @@ impl FilterGraph {
         };
         (*params).width = width as i32;
         (*params).height = height as i32;
-        (*params).hw_frames_ctx = av_buffer_ref(hw_context.as_ptr());
 
         let ret = ffmpeg_next::ffi::av_buffersrc_parameters_set(buffersrc, params);
         ffmpeg_next::ffi::av_free(params as *mut _);
@@ -340,7 +367,7 @@ impl FilterGraph {
             }
         };
 
-        Ok(format!("{},hwdownload,format=rgba", hw_filter))
+        Ok(format!("{}", hw_filter))
     }
 
     /// Processes a single video frame through the filter graph
