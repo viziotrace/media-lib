@@ -108,6 +108,15 @@ impl FilterGraph {
                 return Err(e);
             }
 
+            // Verify filter graph configuration
+            let ret = avfilter_graph_config(graph, null_mut());
+            if ret < 0 {
+                avfilter_graph_free(&mut graph);
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to configure filter graph".into(),
+                ));
+            }
+
             Ok(Self {
                 graph,
                 buffersrc,
@@ -203,22 +212,17 @@ impl FilterGraph {
     ) -> Result<*mut AVFilterContext, MediaLibError> {
         let buffersink_name = CString::new("buffersink")
             .map_err(|_| MediaLibError::FFmpegError("Failed to create buffersink name".into()))?;
-        let mut buffersink = avfilter_graph_alloc_filter(
-            *graph,
-            ffmpeg_next::ffi::avfilter_get_by_name(buffersink_name.as_ptr()),
-            buffersink_name.as_ptr(),
-        );
-        if buffersink.is_null() {
+        let filter = ffmpeg_next::ffi::avfilter_get_by_name(buffersink_name.as_ptr());
+        if filter.is_null() {
             return Err(MediaLibError::FFmpegError(
-                "Failed to allocate buffer sink filter".into(),
+                "Could not find buffersink filter".into(),
             ));
         }
-        (*buffersink).hw_device_ctx = av_buffer_ref(hw_context.as_ptr());
 
-        // Create the buffer sink filter
+        let mut buffersink = null_mut();
         let ret = avfilter_graph_create_filter(
             &mut buffersink,
-            ffmpeg_next::ffi::avfilter_get_by_name(buffersink_name.as_ptr()),
+            filter,
             buffersink_name.as_ptr(),
             null(),
             null_mut(),
@@ -230,6 +234,8 @@ impl FilterGraph {
                 "Failed to create buffer sink filter".into(),
             ));
         }
+
+        (*buffersink).hw_device_ctx = av_buffer_ref(hw_context.as_ptr());
 
         Ok(buffersink)
     }
@@ -244,26 +250,11 @@ impl FilterGraph {
         let filter_str = CString::new(filter_str)
             .map_err(|_| MediaLibError::FFmpegError("Failed to create filter string".into()))?;
 
-        // Initialize inputs
+        // Initialize inputs and outputs
         let mut inputs = ffmpeg_next::ffi::avfilter_inout_alloc();
-        if inputs.is_null() {
-            return Err(MediaLibError::FFmpegError(
-                "Failed to allocate filter inputs".into(),
-            ));
-        }
-
-        // Initialize outputs
         let mut outputs = ffmpeg_next::ffi::avfilter_inout_alloc();
-        if outputs.is_null() {
-            ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
-            return Err(MediaLibError::FFmpegError(
-                "Failed to allocate filter outputs".into(),
-            ));
-        }
 
-        // Parse the filter string
-        let ret = avfilter_graph_parse2(*graph, filter_str.as_ptr(), &mut inputs, &mut outputs);
-        if ret < 0 {
+        if inputs.is_null() || outputs.is_null() {
             if !inputs.is_null() {
                 ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
             }
@@ -271,61 +262,50 @@ impl FilterGraph {
                 ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
             }
             return Err(MediaLibError::FFmpegError(
+                "Failed to allocate filter inputs/outputs".into(),
+            ));
+        }
+
+        // Set up the inputs
+        (*inputs).name = CString::new("in").unwrap().into_raw();
+        (*inputs).filter_ctx = buffersrc;
+        (*inputs).pad_idx = 0;
+        (*inputs).next = null_mut();
+
+        // Set up the outputs
+        (*outputs).name = CString::new("out").unwrap().into_raw();
+        (*outputs).filter_ctx = buffersink;
+        (*outputs).pad_idx = 0;
+        (*outputs).next = null_mut();
+
+        // Parse the filter string
+        let ret = avfilter_graph_parse2(*graph, filter_str.as_ptr(), &mut inputs, &mut outputs);
+        if ret < 0 {
+            ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
+            ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
+            return Err(MediaLibError::FFmpegError(
                 "Failed to parse filter graph".into(),
             ));
         }
 
-        // Link the source filter to the first filter in the chain
-        if !inputs.is_null() {
-            let ret = avfilter_link(buffersrc, 0, (*inputs).filter_ctx, 0);
-            if ret < 0 {
-                ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
-                ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
-                return Err(MediaLibError::FFmpegError(
-                    "Failed to link buffer source".into(),
-                ));
-            }
-        }
-
-        // Link the last filter in the chain to the sink
-        if !outputs.is_null() {
-            let ret = avfilter_link((*outputs).filter_ctx, 0, buffersink, 0);
-            if ret < 0 {
-                ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
-                ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
-                return Err(MediaLibError::FFmpegError(
-                    "Failed to link buffer sink".into(),
-                ));
-            }
-        }
-
-        // Dump the filter graph for debugging
-        let ret = ffmpeg_next::ffi::avfilter_graph_dump(*graph, null());
-        if !ret.is_null() {
-            let graph_str = unsafe { std::ffi::CStr::from_ptr(ret) }.to_string_lossy();
-            println!("Filter graph configuration:\n{}", graph_str);
-            unsafe { av_free(ret as *mut ::std::os::raw::c_void) };
-        }
-
-        // Print pointer addresses for debugging
-        println!(
-            "Filter graph pointers:\n\
-             graph: {:p}\n\
-             inputs: {:p}\n\
-             outputs: {:p}\n\
-             buffersrc: {:p}\n\
-             buffersink: {:p}",
-            *graph, inputs, outputs, buffersrc, buffersink
-        );
-
-        // Configure the complete graph
-        let ret = avfilter_graph_config(*graph, null_mut());
-        println!("ret: {}", ret);
+        // Directly link buffer source to first filter and last filter to buffer sink
+        let ret = avfilter_link(buffersrc, 0, (*inputs).filter_ctx, 0);
         if ret < 0 {
             return Err(MediaLibError::FFmpegError(
-                format!("Failed to configure filter graph: {}", ret).into(),
+                "Failed to link buffer source to filter chain".into(),
             ));
         }
+
+        let ret = avfilter_link((*outputs).filter_ctx, 0, buffersink, 0);
+        if ret < 0 {
+            return Err(MediaLibError::FFmpegError(
+                "Failed to link filter chain to buffer sink".into(),
+            ));
+        }
+
+        // Free the filter inputs/outputs
+        ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
+        ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
 
         Ok(())
     }
