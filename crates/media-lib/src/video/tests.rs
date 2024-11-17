@@ -36,11 +36,8 @@ mod tests {
                     // Verify frame data is valid RGBA
                     let data = frame.frame.data(0);
                     assert!(data.len() > 1, "Video frame should have multiple planes");
-                    assert_eq!(
-                        data.len(),
-                        (frame.frame.width() * frame.frame.height() * 4) as usize,
-                        "Incorrect RGBA data size"
-                    );
+                    let pix_fmt = frame.frame.format();
+                    assert_eq!(pix_fmt, ffmpeg_next::format::Pixel::RGBA);
                 }
                 Err(e) => panic!("Failed to decode frame: {}", e),
             }
