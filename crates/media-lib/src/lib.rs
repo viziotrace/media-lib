@@ -151,5 +151,5 @@ pub fn new_frame_decoder(
 pub fn init_logging() {
     let log_level = ffmpeg::util::log::Level::Info;
     ffmpeg::util::log::set_level(log_level);
-    pretty_env_logger::init();
+    let _ = env_logger::try_init();
 }

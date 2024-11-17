@@ -196,8 +196,20 @@ impl HardwareAcceleratedVideoDecoder {
                         if self.filter_graph.is_none() {
                             let width = decoded.width();
                             let height = decoded.height();
-                            let time_base = ffmpeg_next::Rational::new(1, 1000);
                             let pix_fmt = decoded.format();
+
+                            // Get time base from stream we don't have this until we've started decoding.
+                            let time_base = match self.input_context.stream(self.video_stream_index)
+                            {
+                                Some(stream) => stream.time_base(),
+                                None => {
+                                    return Some(Err(MediaLibError::FFmpegError(
+                                        StabbyString::from(
+                                            "Failed to get stream time base".to_string(),
+                                        ),
+                                    )))
+                                }
+                            };
 
                             match FilterGraph::new(
                                 hw_context.clone(),

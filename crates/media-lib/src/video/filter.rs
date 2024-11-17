@@ -2,12 +2,12 @@ use super::hardware::HardwareContext;
 use super::types::VideoSize;
 use ffmpeg_next::ffi::{
     av_buffer_ref, av_buffer_unref, av_buffersink_get_frame, av_buffersrc_add_frame_flags,
-    av_buffersrc_parameters_alloc, av_buffersrc_parameters_set, av_free, av_hwframe_ctx_alloc,
-    av_hwframe_ctx_init, avfilter_graph_alloc, avfilter_graph_alloc_filter, avfilter_graph_config,
-    avfilter_graph_create_filter, avfilter_graph_free, avfilter_graph_parse2, avfilter_init_str,
-    avfilter_link, AVFilterContext, AVFilterGraph, AVHWFramesContext, AVPixelFormat,
+    av_hwframe_ctx_alloc, av_hwframe_ctx_init, avfilter_graph_alloc, avfilter_graph_alloc_filter,
+    avfilter_graph_config, avfilter_graph_create_filter, avfilter_graph_free,
+    avfilter_graph_parse2, avfilter_init_str, avfilter_link, AVFilterContext, AVFilterGraph,
+    AVHWFramesContext, AVPixelFormat,
 };
-use image::buffer;
+use log::{debug, error, info, trace, warn};
 use media_types::MediaLibError;
 use std::ffi::{CStr, CString};
 use std::ptr::{null, null_mut};
@@ -27,8 +27,6 @@ pub struct FilterGraph {
     buffersrc: *mut AVFilterContext,
     /// The buffer sink filter that outputs processed frames
     buffersink: *mut AVFilterContext,
-    /// Hardware acceleration context used for processing
-    hw_context: Arc<HardwareContext>,
 }
 
 impl FilterGraph {
@@ -40,7 +38,7 @@ impl FilterGraph {
     /// * `original_height` - Height of input frames  
     /// * `target_size` - Desired output frame size
     /// * `time_base` - Time base for frame timestamps
-    ///
+    /// * `pix_fmt` - Pixel format for input frames
     /// # Returns
     /// A configured filter graph ready for processing frames
     pub fn new(
@@ -51,6 +49,14 @@ impl FilterGraph {
         time_base: ffmpeg_next::Rational,
         pix_fmt: ffmpeg_next::ffi::AVPixelFormat,
     ) -> Result<Self, MediaLibError> {
+        debug!(
+            "Creating new filter graph with dimensions {}x{} -> {}x{}",
+            original_width,
+            original_height,
+            target_size.dimensions().0,
+            target_size.dimensions().1
+        );
+
         unsafe {
             // Create the filter graph
             let mut graph = Self::create_filter_graph()?;
@@ -66,19 +72,16 @@ impl FilterGraph {
             ) {
                 Ok(src) => src,
                 Err(e) => {
+                    error!("Failed to create buffer source: {}", e);
                     avfilter_graph_free(&mut graph);
                     return Err(e);
                 }
             };
 
-            let buffersink = match Self::create_buffer_sink(
-                &mut graph,
-                target_size.dimensions(),
-                pix_fmt,
-                &hw_context,
-            ) {
+            let buffersink = match Self::create_buffer_sink(&mut graph, &hw_context) {
                 Ok(sink) => sink,
                 Err(e) => {
+                    error!("Failed to create buffer sink: {}", e);
                     avfilter_graph_free(&mut graph);
                     return Err(e);
                 }
@@ -87,25 +90,24 @@ impl FilterGraph {
             // Create the filter chain for hardware processing
             let filter_str = match Self::create_filter_str(
                 hw_context.device_type(),
-                original_width,
-                original_height,
                 target_size.dimensions().0,
                 target_size.dimensions().1,
-                time_base,
                 hw_context.pixel_format(),
             ) {
                 Ok(str) => str,
                 Err(e) => {
+                    error!("Failed to create filter string: {}", e);
                     avfilter_graph_free(&mut graph);
                     return Err(e);
                 }
             };
-            println!("filter_str: {}", filter_str);
+            info!("Using filter string: {}", filter_str);
 
             // Parse and link the filter chain
             if let Err(e) =
                 Self::configure_filter_chain(&mut graph, &filter_str, buffersrc, buffersink)
             {
+                error!("Failed to configure filter chain: {}", e);
                 avfilter_graph_free(&mut graph);
                 return Err(e);
             }
@@ -114,32 +116,35 @@ impl FilterGraph {
             let graph_dump = ffmpeg_next::ffi::avfilter_graph_dump(graph, std::ptr::null_mut());
             if !graph_dump.is_null() {
                 let graph_str = CStr::from_ptr(graph_dump).to_string_lossy();
-                println!("Filter Graph Configuration:\n{}", graph_str);
+                debug!("Filter Graph Configuration:\n{}", graph_str);
                 ffmpeg_next::ffi::av_free(graph_dump as *mut _);
             }
 
             // Verify filter graph configuration
             let ret = avfilter_graph_config(graph, null_mut());
             if ret < 0 {
+                error!("Failed to configure filter graph");
                 avfilter_graph_free(&mut graph);
                 return Err(MediaLibError::FFmpegError(
                     "Failed to configure filter graph".into(),
                 ));
             }
 
+            info!("Successfully created filter graph");
             Ok(Self {
                 graph,
                 buffersrc,
                 buffersink,
-                hw_context,
             })
         }
     }
 
     /// Creates an empty FFmpeg filter graph
     unsafe fn create_filter_graph() -> Result<*mut AVFilterGraph, MediaLibError> {
+        trace!("Creating empty filter graph");
         let graph = avfilter_graph_alloc();
         if graph.is_null() {
+            error!("Failed to allocate filter graph");
             return Err(MediaLibError::FFmpegError(
                 "Failed to allocate filter graph".into(),
             ));
@@ -156,12 +161,16 @@ impl FilterGraph {
         pix_fmt: ffmpeg_next::ffi::AVPixelFormat,
         hw_context: &HardwareContext,
     ) -> Result<*mut AVFilterContext, MediaLibError> {
+        debug!("Creating buffer source filter {}x{}", width, height);
+
         // Get the buffer source filter
         let buffersrc_name = CString::new("buffer").map_err(|_| {
+            error!("Failed to create buffer source name");
             MediaLibError::FFmpegError("Failed to create buffer source name".into())
         })?;
         let filter = ffmpeg_next::ffi::avfilter_get_by_name(buffersrc_name.as_ptr());
         if filter.is_null() {
+            error!("Could not find FFmpeg buffer source filter 'buffer'");
             return Err(MediaLibError::FFmpegError(
                 "Could not find FFmpeg buffer source filter 'buffer'".into(),
             ));
@@ -170,6 +179,7 @@ impl FilterGraph {
         // Allocate the filter context
         let buffersrc = avfilter_graph_alloc_filter(*graph, filter, buffersrc_name.as_ptr());
         if buffersrc.is_null() {
+            error!("Failed to allocate memory for buffer source filter context");
             return Err(MediaLibError::FFmpegError(
                 "Failed to allocate memory for buffer source filter context".into(),
             ));
@@ -180,6 +190,7 @@ impl FilterGraph {
         // Create hardware frames context for buffer source
         let mut hw_frames_ctx = av_hwframe_ctx_alloc(hw_context.as_ptr());
         if hw_frames_ctx.is_null() {
+            error!("Failed to allocate hardware frames context");
             return Err(MediaLibError::FFmpegError(
                 "Failed to allocate hardware frames context".into(),
             ));
@@ -196,6 +207,7 @@ impl FilterGraph {
         // Initialize the hardware frames context
         let ret = av_hwframe_ctx_init(hw_frames_ctx);
         if ret < 0 {
+            error!("Failed to initialize hardware frames context");
             av_buffer_unref(&mut hw_frames_ctx);
             return Err(MediaLibError::FFmpegError(
                 "Failed to initialize hardware frames context".into(),
@@ -205,19 +217,21 @@ impl FilterGraph {
         // Allocate and initialize buffer source parameters
         let params = ffmpeg_next::ffi::av_buffersrc_parameters_alloc();
         if params.is_null() {
+            error!("Failed to allocate buffer source parameters");
             return Err(MediaLibError::FFmpegError(
                 "Failed to allocate buffer source parameters".into(),
             ));
         }
 
-        println!("hw_frames_ctx: {:?}", pix_fmt);
+        trace!(
+            "hw_frames_ctx: {:?} time_base: {:?}",
+            hw_frames_ctx,
+            time_base
+        );
         // Set the parameters
         (*params).hw_frames_ctx = hw_frames_ctx;
         (*params).format = pix_fmt as i32;
-        (*params).time_base = ffmpeg_next::ffi::AVRational {
-            num: time_base.numerator(),
-            den: time_base.denominator(),
-        };
+        (*params).time_base = time_base.into();
         (*params).width = width as i32;
         (*params).height = height as i32;
 
@@ -225,6 +239,7 @@ impl FilterGraph {
         ffmpeg_next::ffi::av_free(params as *mut _);
 
         if ret < 0 {
+            error!("Failed to set buffer source parameters");
             return Err(MediaLibError::FFmpegError(
                 "Failed to set buffer source parameters".into(),
             ));
@@ -233,25 +248,27 @@ impl FilterGraph {
         // Initialize the filter
         let ret = avfilter_init_str(buffersrc, std::ptr::null());
         if ret < 0 {
+            error!("Failed to initialize buffer source filter");
             return Err(MediaLibError::FFmpegError(
                 "Failed to initialize buffer source filter".into(),
             ));
         }
 
+        debug!("Successfully created buffer source filter");
         Ok(buffersrc)
     }
 
     /// Creates and configures the buffer sink filter
     unsafe fn create_buffer_sink(
         graph: &mut *mut AVFilterGraph,
-        dimensions: (u32, u32),
-        pix_fmt: ffmpeg_next::ffi::AVPixelFormat,
         hw_context: &HardwareContext,
     ) -> Result<*mut AVFilterContext, MediaLibError> {
+        debug!("Creating buffer sink filter");
         let buffersink_name = CString::new("buffersink")
             .map_err(|_| MediaLibError::FFmpegError("Failed to create buffersink name".into()))?;
         let filter = ffmpeg_next::ffi::avfilter_get_by_name(buffersink_name.as_ptr());
         if filter.is_null() {
+            error!("Could not find buffersink filter");
             return Err(MediaLibError::FFmpegError(
                 "Could not find buffersink filter".into(),
             ));
@@ -268,6 +285,7 @@ impl FilterGraph {
         );
 
         if ret < 0 {
+            error!("Failed to create buffer sink filter");
             return Err(MediaLibError::FFmpegError(
                 "Failed to create buffer sink filter".into(),
             ));
@@ -275,6 +293,7 @@ impl FilterGraph {
 
         (*buffersink).hw_device_ctx = av_buffer_ref(hw_context.as_ptr());
 
+        debug!("Successfully created buffer sink filter");
         Ok(buffersink)
     }
 
@@ -285,6 +304,7 @@ impl FilterGraph {
         buffersrc: *mut AVFilterContext,
         buffersink: *mut AVFilterContext,
     ) -> Result<(), MediaLibError> {
+        debug!("Configuring filter chain with string: {}", filter_str);
         let filter_str = CString::new(filter_str)
             .map_err(|_| MediaLibError::FFmpegError("Failed to create filter string".into()))?;
 
@@ -293,6 +313,7 @@ impl FilterGraph {
         let mut outputs = ffmpeg_next::ffi::avfilter_inout_alloc();
 
         if inputs.is_null() || outputs.is_null() {
+            error!("Failed to allocate filter inputs/outputs");
             if !inputs.is_null() {
                 ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
             }
@@ -319,6 +340,7 @@ impl FilterGraph {
         // Parse the filter string
         let ret = avfilter_graph_parse2(*graph, filter_str.as_ptr(), &mut inputs, &mut outputs);
         if ret < 0 {
+            error!("Failed to parse filter graph");
             ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
             ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
             return Err(MediaLibError::FFmpegError(
@@ -338,6 +360,7 @@ impl FilterGraph {
         // ers Directly link buffer source to first filter and last filter to buffer sink
         let ret = avfilter_link(buffersrc, 0, (*inputs).filter_ctx, 0);
         if ret < 0 {
+            error!("Failed to link buffer source to filter chain");
             return Err(MediaLibError::FFmpegError(
                 "Failed to link buffer source to filter chain".into(),
             ));
@@ -345,6 +368,7 @@ impl FilterGraph {
 
         let ret = avfilter_link((*outputs).filter_ctx, 0, buffersink, 0);
         if ret < 0 {
+            error!("Failed to link filter chain to buffer sink");
             return Err(MediaLibError::FFmpegError(
                 "Failed to link filter chain to buffer sink".into(),
             ));
@@ -354,30 +378,38 @@ impl FilterGraph {
         ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
         ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
 
+        debug!("Successfully configured filter chain");
         Ok(())
     }
 
     /// Creates the filter chain string for hardware-specific processing
     fn create_filter_str(
         device_type: ffmpeg_next::ffi::AVHWDeviceType,
-        original_width: u32,
-        original_height: u32,
         target_width: u32,
         target_height: u32,
-        time_base: ffmpeg_next::Rational,
         pix_fmt: ffmpeg_next::ffi::AVPixelFormat,
     ) -> Result<String, MediaLibError> {
+        debug!("Creating filter string for device type: {:?}", device_type);
         match device_type {
-            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA => Ok(format!(
-                "hwupload_cuda,scale_cuda={}:{},hwdownload_cuda",
-                target_width, target_height
-            )),
-            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX => Ok(format!(
-                "format={},hwupload,scale_vt={}:{},hwdownload,format=nv12,format=rgba",
-                pix_fmt as i32, target_width, target_height
-            )),
+            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA => {
+                let filter_str = format!(
+                    "hwupload_cuda,scale_cuda={}:{},hwdownload_cuda",
+                    target_width, target_height
+                );
+                debug!("Created CUDA filter string: {}", filter_str);
+                Ok(filter_str)
+            }
+            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX => {
+                let filter_str = format!(
+                    "format={},hwupload,scale_vt={}:{},hwdownload,format=nv12,format=rgba",
+                    pix_fmt as i32, target_width, target_height
+                );
+                debug!("Created VideoToolbox filter string: {}", filter_str);
+                Ok(filter_str)
+            }
             _ => {
-                return Err(MediaLibError::FFmpegError(
+                error!("Unsupported hardware device type: {:?}", device_type);
+                Err(MediaLibError::FFmpegError(
                     "Unsupported hardware device type".into(),
                 ))
             }
@@ -395,7 +427,9 @@ impl FilterGraph {
         &mut self,
         input: &mut ffmpeg_next::frame::Video,
     ) -> Result<ffmpeg_next::frame::Video, MediaLibError> {
+        trace!("Processing frame through filter graph");
         if self.buffersrc.is_null() || self.buffersink.is_null() {
+            error!("Filter contexts are null");
             return Err(MediaLibError::FFmpegError(
                 "Filter contexts are null".into(),
             ));
@@ -410,6 +444,7 @@ impl FilterGraph {
             );
 
             if ret < 0 {
+                error!("Failed to add frame to filter");
                 return Err(MediaLibError::FFmpegError(
                     "Failed to add frame to filter".into(),
                 ));
@@ -420,11 +455,13 @@ impl FilterGraph {
             let ret = av_buffersink_get_frame(self.buffersink, output.as_mut_ptr());
 
             if ret < 0 {
+                error!("Failed to get filtered frame");
                 return Err(MediaLibError::FFmpegError(
                     "Failed to get filtered frame".into(),
                 ));
             }
 
+            trace!("Successfully processed frame");
             Ok(output)
         }
     }
@@ -432,6 +469,7 @@ impl FilterGraph {
 
 impl Drop for FilterGraph {
     fn drop(&mut self) {
+        debug!("Dropping FilterGraph");
         unsafe {
             if !self.graph.is_null() {
                 avfilter_graph_free(&mut self.graph);

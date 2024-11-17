@@ -7,7 +7,9 @@ mod tests {
 
     #[test]
     fn test_decode_video() {
-        ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Debug);
+        ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Info);
+        let out = env_logger::builder().is_test(true).try_init();
+        println!("Logger initialized: {:?}", out);
         let test_video_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/test.mp4");
 
         let mut decoder = HardwareAcceleratedVideoDecoder::new(&test_video_path, VideoSize::P240)
