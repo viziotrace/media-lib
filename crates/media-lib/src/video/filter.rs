@@ -9,7 +9,7 @@ use ffmpeg_next::ffi::{
 };
 use image::buffer;
 use media_types::MediaLibError;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
 
@@ -100,6 +100,7 @@ impl FilterGraph {
                     return Err(e);
                 }
             };
+            println!("filter_str: {}", filter_str);
 
             // Parse and link the filter chain
             if let Err(e) =
@@ -107,6 +108,14 @@ impl FilterGraph {
             {
                 avfilter_graph_free(&mut graph);
                 return Err(e);
+            }
+
+            // Dump the filter graph for debugging
+            let graph_dump = ffmpeg_next::ffi::avfilter_graph_dump(graph, std::ptr::null_mut());
+            if !graph_dump.is_null() {
+                let graph_str = CStr::from_ptr(graph_dump).to_string_lossy();
+                println!("Filter Graph Configuration:\n{}", graph_str);
+                ffmpeg_next::ffi::av_free(graph_dump as *mut _);
             }
 
             // Verify filter graph configuration
@@ -165,6 +174,8 @@ impl FilterGraph {
                 "Failed to allocate memory for buffer source filter context".into(),
             ));
         }
+
+        (*buffersrc).hw_device_ctx = av_buffer_ref(hw_context.as_ptr());
 
         // Create hardware frames context for buffer source
         let mut hw_frames_ctx = av_hwframe_ctx_alloc(hw_context.as_ptr());
@@ -315,7 +326,16 @@ impl FilterGraph {
             ));
         }
 
-        // Directly link buffer source to first filter and last filter to buffer sink
+        // XXX: Super ugly AI helped me figure this out but its pretty bad.
+        // Set hardware device context for all filters in the graph. Because we've initialized the filters with a string we need to iterate through and set the hw_device_ctx manually.
+        for i in 0..(**graph).nb_filters as isize {
+            let filter = *(**graph).filters.offset(i);
+            if !filter.is_null() {
+                (*filter).hw_device_ctx = av_buffer_ref((*buffersrc).hw_device_ctx);
+            }
+        }
+
+        // ers Directly link buffer source to first filter and last filter to buffer sink
         let ret = avfilter_link(buffersrc, 0, (*inputs).filter_ctx, 0);
         if ret < 0 {
             return Err(MediaLibError::FFmpegError(
@@ -347,27 +367,21 @@ impl FilterGraph {
         time_base: ffmpeg_next::Rational,
         pix_fmt: ffmpeg_next::ffi::AVPixelFormat,
     ) -> Result<String, MediaLibError> {
-        let hw_filter = match device_type {
-            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA => {
-                format!(
-                    "hwupload_cuda,scale_cuda=w={}:h={}",
-                    target_width, target_height
-                )
-            }
-            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX => {
-                format!(
-                    "format=pix_fmts={},scale_vt=w={}:h={}",
-                    pix_fmt as i32, target_width, target_height
-                )
-            }
+        match device_type {
+            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA => Ok(format!(
+                "hwupload_cuda,scale_cuda={}:{},hwdownload_cuda",
+                target_width, target_height
+            )),
+            ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX => Ok(format!(
+                "format={},hwupload,scale_vt={}:{},hwdownload,format=",
+                pix_fmt as i32, target_width, target_height
+            )),
             _ => {
                 return Err(MediaLibError::FFmpegError(
                     "Unsupported hardware device type".into(),
                 ))
             }
-        };
-
-        Ok(format!("{}", hw_filter))
+        }
     }
 
     /// Processes a single video frame through the filter graph
