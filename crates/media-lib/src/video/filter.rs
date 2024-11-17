@@ -373,7 +373,7 @@ impl FilterGraph {
                 target_width, target_height
             )),
             ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX => Ok(format!(
-                "format={},hwupload,scale_vt={}:{},hwdownload,format=",
+                "format={},hwupload,scale_vt={}:{},hwdownload,format=nv12",
                 pix_fmt as i32, target_width, target_height
             )),
             _ => {

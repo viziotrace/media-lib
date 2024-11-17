@@ -34,16 +34,13 @@ mod tests {
                     }
 
                     // Verify frame data is valid RGBA
-                    let data = frame.frame.planes();
-                    assert!(data > 1, "Video frame should have multiple planes");
-                    println!("data: {:?}", data);
-
-                    // assert!(!data.is_empty(), "Frame data is empty");
-                    // assert_eq!(
-                    //     data.len(),
-                    //     (frame.frame.width() * frame.frame.height() * 4) as usize,
-                    //     "Incorrect RGBA data size"
-                    // );
+                    let data = frame.frame.data(0);
+                    assert!(data.len() > 1, "Video frame should have multiple planes");
+                    assert_eq!(
+                        data.len(),
+                        (frame.frame.width() * frame.frame.height() * 4) as usize,
+                        "Incorrect RGBA data size"
+                    );
                 }
                 Err(e) => panic!("Failed to decode frame: {}", e),
             }
