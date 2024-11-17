@@ -107,13 +107,15 @@ mod tests {
 
         // Load the test movie file
         let test_movie = test::get_test_data_file("test.mp4");
+        let (target_width, target_height) = media_types::VideoSize::P240.dimensions();
 
         // Create frame decoder
         let mut decoder = client
             .new_frame_decoder(
                 test_movie.to_str().unwrap(),
                 MediaFrameDecoderOptions {
-                    target_size: media_types::VideoSize::P240,
+                    target_width,
+                    target_height,
                 },
             )
             .unwrap();

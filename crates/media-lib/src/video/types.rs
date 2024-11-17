@@ -22,5 +22,5 @@ impl VideoSize {
 }
 
 pub struct DecodedVideoFrame {
-    pub frame: frame::Video,
+    pub video: frame::Video,
 }

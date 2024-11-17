@@ -45,16 +45,14 @@ impl FilterGraph {
         hw_context: Arc<HardwareContext>,
         original_width: u32,
         original_height: u32,
-        target_size: VideoSize,
+        target_width: u32,
+        target_height: u32,
         time_base: ffmpeg_next::Rational,
         pix_fmt: ffmpeg_next::ffi::AVPixelFormat,
     ) -> Result<Self, MediaLibError> {
         debug!(
             "Creating new filter graph with dimensions {}x{} -> {}x{}",
-            original_width,
-            original_height,
-            target_size.dimensions().0,
-            target_size.dimensions().1
+            original_width, original_height, target_width, target_height
         );
 
         unsafe {
@@ -90,8 +88,8 @@ impl FilterGraph {
             // Create the filter chain for hardware processing
             let filter_str = match Self::create_filter_str(
                 hw_context.device_type(),
-                target_size.dimensions().0,
-                target_size.dimensions().1,
+                target_width,
+                target_height,
                 hw_context.pixel_format(),
             ) {
                 Ok(str) => str,

@@ -11,9 +11,11 @@ mod tests {
         let out = env_logger::builder().is_test(true).try_init();
         println!("Logger initialized: {:?}", out);
         let test_video_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/test.mp4");
+        let (target_width, target_height) = VideoSize::P240.dimensions();
 
-        let mut decoder = HardwareAcceleratedVideoDecoder::new(&test_video_path, VideoSize::P240)
-            .expect("Failed to create decoder");
+        let mut decoder =
+            HardwareAcceleratedVideoDecoder::new(&test_video_path, target_width, target_height)
+                .expect("Failed to create decoder");
 
         let mut frame_count = 0;
         let mut first_frame_dimensions = None;
@@ -25,7 +27,7 @@ mod tests {
 
                     // Check first frame dimensions
                     if first_frame_dimensions.is_none() {
-                        first_frame_dimensions = Some((frame.frame.width(), frame.frame.height()));
+                        first_frame_dimensions = Some((frame.video.width(), frame.video.height()));
 
                         // Verify dimensions match requested size
                         assert_eq!(
@@ -36,9 +38,9 @@ mod tests {
                     }
 
                     // Verify frame data is valid RGBA
-                    let data = frame.frame.data(0);
+                    let data = frame.video.data(0);
                     assert!(data.len() > 1, "Video frame should have multiple planes");
-                    let pix_fmt = frame.frame.format();
+                    let pix_fmt = frame.video.format();
                     assert_eq!(pix_fmt, ffmpeg_next::format::Pixel::RGBA);
                 }
                 Err(e) => panic!("Failed to decode frame: {}", e),

@@ -15,6 +15,18 @@ pub enum VideoSize {
     P1080, // 1920x1080
 }
 
+impl VideoSize {
+    pub fn dimensions(&self) -> (u32, u32) {
+        match self {
+            VideoSize::P240 => (426, 240),
+            VideoSize::P360 => (640, 360),
+            VideoSize::P480 => (854, 480),
+            VideoSize::P720 => (1280, 720),
+            VideoSize::P1080 => (1920, 1080),
+        }
+    }
+}
+
 #[stabby::stabby]
 #[repr(stabby)]
 #[derive(Debug, Clone)]
@@ -58,7 +70,8 @@ pub type VideoFrameResult = Result<dynptr!(Box<dyn VideoFrame>), MediaLibError>;
 #[stabby::stabby]
 #[derive(Debug, Clone)]
 pub struct MediaFrameDecoderOptions {
-    pub target_size: VideoSize,
+    pub target_width: u32,
+    pub target_height: u32,
 }
 
 #[stabby::stabby]

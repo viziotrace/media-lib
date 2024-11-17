@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use media_client::load;
-use media_client::media_types::{MediaFrameDecoderDynMut, VideoFrameDyn};
+use media_client::media_types::{MediaFrameDecoderDynMut, VideoFrameDyn, VideoSize};
 use std::fs;
 use std::path::Path;
 
@@ -68,11 +68,14 @@ fn main() {
                 fs::create_dir_all(&output_dir).expect("Failed to create output directory");
             }
 
+            let (target_width, target_height) = VideoSize::P240.dimensions();
+
             let mut decoder = client
                 .new_frame_decoder(
                     input.as_str(),
                     media_client::media_types::MediaFrameDecoderOptions {
-                        target_size: media_client::media_types::VideoSize::P720,
+                        target_width,
+                        target_height,
                     },
                 )
                 .unwrap();

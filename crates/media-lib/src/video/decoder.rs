@@ -57,14 +57,19 @@ pub struct HardwareAcceleratedVideoDecoder {
     decoder: codec::decoder::Video,
     input_context: ffmpeg_next::format::context::Input,
     video_stream_index: usize,
-    target_size: VideoSize,
+    target_width: u32,
+    target_height: u32,
     eof_sent: bool,
 }
 
 impl HardwareAcceleratedVideoDecoder {
     /// Attempts hardware decoder initialization, falling back to software if unavailable.
     /// Hardware support is detected by checking codec hw_configs and attempting device creation.
-    pub fn new(input_path: &Path, target_size: VideoSize) -> Result<Self, MediaLibError> {
+    pub fn new(
+        input_path: &Path,
+        target_width: u32,
+        target_height: u32,
+    ) -> Result<Self, MediaLibError> {
         // Open input context
         let input_context = ffmpeg_next::format::input(input_path)
             .map_err(|e| MediaLibError::FFmpegError(StabbyString::from(e.to_string())))?;
@@ -154,7 +159,8 @@ impl HardwareAcceleratedVideoDecoder {
             decoder,
             input_context,
             video_stream_index,
-            target_size,
+            target_width,
+            target_height,
             eof_sent: false,
         })
     }
@@ -215,7 +221,8 @@ impl HardwareAcceleratedVideoDecoder {
                                 hw_context.clone(),
                                 width,
                                 height,
-                                self.target_size,
+                                self.target_width,
+                                self.target_height,
                                 time_base,
                                 pix_fmt.into(),
                             ) {
@@ -229,12 +236,12 @@ impl HardwareAcceleratedVideoDecoder {
                             return Some(
                                 graph
                                     .process_frame(&mut decoded)
-                                    .map(|frame| DecodedVideoFrame { frame }),
+                                    .map(|frame| DecodedVideoFrame { video: frame }),
                             );
                         }
                     }
 
-                    return Some(Ok(DecodedVideoFrame { frame: decoded }));
+                    return Some(Ok(DecodedVideoFrame { video: decoded }));
                 }
                 Err(ffmpeg_next::Error::Other { errno }) if errno == NEED_MORE_DATA => {
                     match self.get_next_video_packet() {
