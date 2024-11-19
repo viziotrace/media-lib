@@ -197,38 +197,33 @@ impl HardwareAcceleratedVideoDecoder {
         loop {
             match self.decoder.receive_frame(&mut decoded) {
                 Ok(_) => {
-                    if let Some(ref hw_context) = self.hardware_context {
-                        // Initialize filter graph if needed
-                        if self.filter_graph.is_none() {
-                            let width = decoded.width();
-                            let height = decoded.height();
-                            let pix_fmt = decoded.format();
+                    // Initialize filter graph if needed
+                    if self.filter_graph.is_none() {
+                        let width = decoded.width();
+                        let height = decoded.height();
+                        let pix_fmt = decoded.format();
 
-                            // Get time base from stream we don't have this until we've started decoding.
-                            let time_base = match self.input_context.stream(self.video_stream_index)
-                            {
-                                Some(stream) => stream.time_base(),
-                                None => {
-                                    return Some(Err(MediaLibError::FFmpegError(
-                                        StabbyString::from(
-                                            "Failed to get stream time base".to_string(),
-                                        ),
-                                    )))
-                                }
-                            };
-
-                            match FilterGraph::new(
-                                hw_context.clone(),
-                                width,
-                                height,
-                                self.target_width,
-                                self.target_height,
-                                time_base,
-                                pix_fmt.into(),
-                            ) {
-                                Ok(graph) => self.filter_graph = Some(graph),
-                                Err(e) => return Some(Err(e)),
+                        // Get time base from stream we don't have this until we've started decoding.
+                        let time_base = match self.input_context.stream(self.video_stream_index) {
+                            Some(stream) => stream.time_base(),
+                            None => {
+                                return Some(Err(MediaLibError::FFmpegError(StabbyString::from(
+                                    "Failed to get stream time base".to_string(),
+                                ))))
                             }
+                        };
+
+                        match FilterGraph::new(
+                            self.hardware_context.clone(),
+                            width,
+                            height,
+                            self.target_width,
+                            self.target_height,
+                            time_base,
+                            pix_fmt.into(),
+                        ) {
+                            Ok(graph) => self.filter_graph = Some(graph),
+                            Err(e) => return Some(Err(e)),
                         }
 
                         // Process frame through hardware filter
@@ -240,8 +235,6 @@ impl HardwareAcceleratedVideoDecoder {
                             );
                         }
                     }
-
-                    return Some(Ok(DecodedVideoFrame { video: decoded }));
                 }
                 Err(ffmpeg_next::Error::Other { errno }) if errno == NEED_MORE_DATA => {
                     match self.get_next_video_packet() {

@@ -19,7 +19,7 @@ log = "0.4.22"
 env_logger = "0.11.5"
 
 [features]
-default = ["videotoolbox"]
+default = []
 videotoolbox = ["ffmpeg-next/build-videotoolbox"]
 d3d12va = ["ffmpeg-next/build-d3d12va"]
 nvdec = ["ffmpeg-next/build-nvdec"]

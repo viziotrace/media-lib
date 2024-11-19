@@ -50,30 +50,4 @@ mod tests {
         assert!(frame_count > 0, "No frames were decoded");
         println!("Successfully decoded {} frames", frame_count);
     }
-
-    #[test]
-    fn test_hardware_detection() {
-        // Try to create hardware contexts for supported types
-        let cuda = HardwareContext::new(
-            AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
-            AVPixelFormat::AV_PIX_FMT_NV12,
-        );
-        let videotoolbox = HardwareContext::new(
-            AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
-            AVPixelFormat::AV_PIX_FMT_NV12,
-        );
-
-        // At least one should be available on most systems
-        assert!(
-            cuda.is_ok() || videotoolbox.is_ok(),
-            "No hardware acceleration available - tests will use software decoding"
-        );
-
-        if let Ok(ctx) = cuda {
-            println!("CUDA hardware acceleration available");
-        }
-        if let Ok(ctx) = videotoolbox {
-            println!("VideoToolbox hardware acceleration available");
-        }
-    }
 }
