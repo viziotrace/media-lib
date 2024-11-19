@@ -13,6 +13,15 @@ use std::ffi::{CStr, CString};
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
 
+struct HwFramesCtxGuard(*mut ffmpeg_next::ffi::AVBufferRef);
+impl Drop for HwFramesCtxGuard {
+    fn drop(&mut self) {
+        unsafe {
+            ffmpeg_next::ffi::av_buffer_unref(&mut self.0);
+        }
+    }
+}
+
 /// FFmpeg filter graph implementation for hardware-accelerated video processing.
 /// Handles frame format conversion and scaling using hardware-specific filters.
 ///
@@ -185,75 +194,83 @@ impl FilterGraph {
 
         (*buffersrc).hw_device_ctx = av_buffer_ref(hw_context.as_ptr());
 
-        // Create hardware frames context for buffer source
-        let mut hw_frames_ctx = av_hwframe_ctx_alloc(hw_context.as_ptr());
-        if hw_frames_ctx.is_null() {
-            error!("Failed to allocate hardware frames context");
-            return Err(MediaLibError::FFmpegError(
-                "Failed to allocate hardware frames context".into(),
-            ));
+        let result = (|| {
+            let mut hw_frames_ctx = av_hwframe_ctx_alloc(hw_context.as_ptr());
+            if hw_frames_ctx.is_null() {
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to allocate hardware frames context".into(),
+                ));
+            }
+            // Use defer pattern to ensure cleanup on error
+
+            let _guard = HwFramesCtxGuard(hw_frames_ctx);
+
+            // Configure frames context
+            let frames_ctx = (*hw_frames_ctx).data as *mut AVHWFramesContext;
+            (*frames_ctx).format = pix_fmt;
+            (*frames_ctx).sw_format = AVPixelFormat::AV_PIX_FMT_NV12;
+            (*frames_ctx).width = width as i32;
+            (*frames_ctx).height = height as i32;
+
+            // Initialize
+            let ret = av_hwframe_ctx_init(hw_frames_ctx);
+            if ret < 0 {
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to initialize hardware frames context".into(),
+                ));
+            }
+
+            // Allocate and initialize buffer source parameters
+            let params = ffmpeg_next::ffi::av_buffersrc_parameters_alloc();
+            if params.is_null() {
+                error!("Failed to allocate buffer source parameters");
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to allocate buffer source parameters".into(),
+                ));
+            }
+
+            trace!(
+                "hw_frames_ctx: {:?} time_base: {:?}",
+                hw_frames_ctx,
+                time_base
+            );
+            // Set the parameters
+            (*params).hw_frames_ctx = hw_frames_ctx;
+            (*params).format = pix_fmt as i32;
+            (*params).time_base = time_base.into();
+            (*params).width = width as i32;
+            (*params).height = height as i32;
+
+            let ret = ffmpeg_next::ffi::av_buffersrc_parameters_set(buffersrc, params);
+            ffmpeg_next::ffi::av_free(params as *mut _);
+
+            if ret < 0 {
+                error!("Failed to set buffer source parameters");
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to set buffer source parameters".into(),
+                ));
+            }
+
+            // Initialize the filter
+            let ret = avfilter_init_str(buffersrc, std::ptr::null());
+            if ret < 0 {
+                error!("Failed to initialize buffer source filter");
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to initialize buffer source filter".into(),
+                ));
+            }
+
+            debug!("Successfully created buffer source filter");
+            Ok(buffersrc)
+        })();
+
+        match result {
+            Ok(buffersrc) => Ok(buffersrc),
+            Err(e) => {
+                error!("Buffer source creation failed: {}", e);
+                Err(e)
+            }
         }
-
-        // Configure the hardware frames context
-        let frames_ctx = (*hw_frames_ctx).data as *mut AVHWFramesContext;
-        (*frames_ctx).format = pix_fmt;
-        // XXX: This is a hack to get the correct format for the hardware frames context. This was tested on videotoolbox and should likely be something else or dynamicly picked.
-        (*frames_ctx).sw_format = AVPixelFormat::AV_PIX_FMT_NV12;
-        (*frames_ctx).width = width as i32;
-        (*frames_ctx).height = height as i32;
-
-        // Initialize the hardware frames context
-        let ret = av_hwframe_ctx_init(hw_frames_ctx);
-        if ret < 0 {
-            error!("Failed to initialize hardware frames context");
-            av_buffer_unref(&mut hw_frames_ctx);
-            return Err(MediaLibError::FFmpegError(
-                "Failed to initialize hardware frames context".into(),
-            ));
-        }
-
-        // Allocate and initialize buffer source parameters
-        let params = ffmpeg_next::ffi::av_buffersrc_parameters_alloc();
-        if params.is_null() {
-            error!("Failed to allocate buffer source parameters");
-            return Err(MediaLibError::FFmpegError(
-                "Failed to allocate buffer source parameters".into(),
-            ));
-        }
-
-        trace!(
-            "hw_frames_ctx: {:?} time_base: {:?}",
-            hw_frames_ctx,
-            time_base
-        );
-        // Set the parameters
-        (*params).hw_frames_ctx = hw_frames_ctx;
-        (*params).format = pix_fmt as i32;
-        (*params).time_base = time_base.into();
-        (*params).width = width as i32;
-        (*params).height = height as i32;
-
-        let ret = ffmpeg_next::ffi::av_buffersrc_parameters_set(buffersrc, params);
-        ffmpeg_next::ffi::av_free(params as *mut _);
-
-        if ret < 0 {
-            error!("Failed to set buffer source parameters");
-            return Err(MediaLibError::FFmpegError(
-                "Failed to set buffer source parameters".into(),
-            ));
-        }
-
-        // Initialize the filter
-        let ret = avfilter_init_str(buffersrc, std::ptr::null());
-        if ret < 0 {
-            error!("Failed to initialize buffer source filter");
-            return Err(MediaLibError::FFmpegError(
-                "Failed to initialize buffer source filter".into(),
-            ));
-        }
-
-        debug!("Successfully created buffer source filter");
-        Ok(buffersrc)
     }
 
     /// Creates and configures the buffer sink filter
@@ -306,78 +323,88 @@ impl FilterGraph {
         let filter_str = CString::new(filter_str)
             .map_err(|_| MediaLibError::FFmpegError("Failed to create filter string".into()))?;
 
-        // Initialize inputs and outputs
-        let mut inputs = ffmpeg_next::ffi::avfilter_inout_alloc();
-        let mut outputs = ffmpeg_next::ffi::avfilter_inout_alloc();
+        let result = (|| {
+            // Initialize inputs and outputs
+            let mut inputs = ffmpeg_next::ffi::avfilter_inout_alloc();
+            let mut outputs = ffmpeg_next::ffi::avfilter_inout_alloc();
 
-        if inputs.is_null() || outputs.is_null() {
-            error!("Failed to allocate filter inputs/outputs");
-            if !inputs.is_null() {
-                ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
+            // Use defer pattern for cleanup
+            struct InOutGuard {
+                inputs: *mut ffmpeg_next::ffi::AVFilterInOut,
+                outputs: *mut ffmpeg_next::ffi::AVFilterInOut,
             }
-            if !outputs.is_null() {
-                ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
+            impl Drop for InOutGuard {
+                fn drop(&mut self) {
+                    unsafe {
+                        ffmpeg_next::ffi::avfilter_inout_free(&mut self.inputs);
+                        ffmpeg_next::ffi::avfilter_inout_free(&mut self.outputs);
+                    }
+                }
             }
-            return Err(MediaLibError::FFmpegError(
-                "Failed to allocate filter inputs/outputs".into(),
-            ));
-        }
+            let _guard = InOutGuard { inputs, outputs };
 
-        // Set up the inputs
-        (*inputs).name = CString::new("in").unwrap().into_raw();
-        (*inputs).filter_ctx = buffersrc;
-        (*inputs).pad_idx = 0;
-        (*inputs).next = null_mut();
+            // Set up the inputs
+            (*inputs).name = CString::new("in").unwrap().into_raw();
+            (*inputs).filter_ctx = buffersrc;
+            (*inputs).pad_idx = 0;
+            (*inputs).next = null_mut();
 
-        // Set up the outputs
-        (*outputs).name = CString::new("out").unwrap().into_raw();
-        (*outputs).filter_ctx = buffersink;
-        (*outputs).pad_idx = 0;
-        (*outputs).next = null_mut();
+            // Set up the outputs
+            (*outputs).name = CString::new("out").unwrap().into_raw();
+            (*outputs).filter_ctx = buffersink;
+            (*outputs).pad_idx = 0;
+            (*outputs).next = null_mut();
 
-        // Parse the filter string
-        let ret = avfilter_graph_parse2(*graph, filter_str.as_ptr(), &mut inputs, &mut outputs);
-        if ret < 0 {
-            error!("Failed to parse filter graph");
+            // Parse the filter string
+            let ret = avfilter_graph_parse2(*graph, filter_str.as_ptr(), &mut inputs, &mut outputs);
+            if ret < 0 {
+                error!("Failed to parse filter graph");
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to parse filter graph".into(),
+                ));
+            }
+
+            // XXX: Super ugly AI helped me figure this out but its pretty bad.
+            // Set hardware device context for all filters in the graph. Because we've initialized the filters with a string we need to iterate through and set the hw_device_ctx manually.
+            for i in 0..(**graph).nb_filters as isize {
+                let filter = *(**graph).filters.offset(i);
+                if !filter.is_null() {
+                    (*filter).hw_device_ctx = av_buffer_ref((*buffersrc).hw_device_ctx);
+                }
+            }
+
+            // ers Directly link buffer source to first filter and last filter to buffer sink
+            let ret = avfilter_link(buffersrc, 0, (*inputs).filter_ctx, 0);
+            if ret < 0 {
+                error!("Failed to link buffer source to filter chain");
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to link buffer source to filter chain".into(),
+                ));
+            }
+
+            let ret = avfilter_link((*outputs).filter_ctx, 0, buffersink, 0);
+            if ret < 0 {
+                error!("Failed to link filter chain to buffer sink");
+                return Err(MediaLibError::FFmpegError(
+                    "Failed to link filter chain to buffer sink".into(),
+                ));
+            }
+
+            // Free the filter inputs/outputs
             ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
             ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
-            return Err(MediaLibError::FFmpegError(
-                "Failed to parse filter graph".into(),
-            ));
-        }
 
-        // XXX: Super ugly AI helped me figure this out but its pretty bad.
-        // Set hardware device context for all filters in the graph. Because we've initialized the filters with a string we need to iterate through and set the hw_device_ctx manually.
-        for i in 0..(**graph).nb_filters as isize {
-            let filter = *(**graph).filters.offset(i);
-            if !filter.is_null() {
-                (*filter).hw_device_ctx = av_buffer_ref((*buffersrc).hw_device_ctx);
+            debug!("Successfully configured filter chain");
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                error!("Filter chain configuration failed: {}", e);
+                Err(e)
             }
         }
-
-        // ers Directly link buffer source to first filter and last filter to buffer sink
-        let ret = avfilter_link(buffersrc, 0, (*inputs).filter_ctx, 0);
-        if ret < 0 {
-            error!("Failed to link buffer source to filter chain");
-            return Err(MediaLibError::FFmpegError(
-                "Failed to link buffer source to filter chain".into(),
-            ));
-        }
-
-        let ret = avfilter_link((*outputs).filter_ctx, 0, buffersink, 0);
-        if ret < 0 {
-            error!("Failed to link filter chain to buffer sink");
-            return Err(MediaLibError::FFmpegError(
-                "Failed to link filter chain to buffer sink".into(),
-            ));
-        }
-
-        // Free the filter inputs/outputs
-        ffmpeg_next::ffi::avfilter_inout_free(&mut inputs);
-        ffmpeg_next::ffi::avfilter_inout_free(&mut outputs);
-
-        debug!("Successfully configured filter chain");
-        Ok(())
     }
 
     /// Creates the filter chain string for hardware-specific processing
