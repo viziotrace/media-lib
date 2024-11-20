@@ -6,6 +6,7 @@ use media_types::{
     MediaFrameDecoder, MediaFrameDecoderOptions, MediaLibError, MediaLibInit, VideoFrame,
     VideoFrameResult,
 };
+use stabby::slice::Slice;
 use video::{DecodedVideoFrame, HardwareAcceleratedVideoDecoder};
 
 #[stabby::stabby]
@@ -91,12 +92,12 @@ impl VideoFrame for VideoFrameWrapper {
         unsafe { (*self.inner.video.as_ptr()).repeat_pict }
     }
 
-    extern "C" fn data_ptr(&self) -> *const u8 {
-        self.inner.video.data(0).as_ptr()
+    extern "C" fn data(&self, idx: usize) -> Slice<u8> {
+        self.inner.video.data(idx).into()
     }
 
-    extern "C" fn data_len(&self) -> usize {
-        self.inner.video.data(0).len()
+    extern "C" fn stride(&self, idx: usize) -> usize {
+        self.inner.video.stride(idx) as usize
     }
 }
 

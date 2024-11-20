@@ -101,6 +101,51 @@ mod tests {
     use media_types::{MediaFrameDecoderDynMut, VideoFrameDyn};
 
     #[test]
+    fn it_can_encode_frames_into_jpeg() {
+        let lib = test::get_media_client_lib();
+        let client = load(&lib).unwrap();
+
+        // Load the test movie file
+        let test_movie = test::get_test_data_file("test.mp4");
+        let (target_width, target_height) = media_types::VideoSize::P240.dimensions();
+
+        // Create frame decoder
+        let mut decoder = client
+            .new_frame_decoder(
+                test_movie.to_str().unwrap(),
+                MediaFrameDecoderOptions {
+                    target_width,
+                    target_height,
+                },
+            )
+            .unwrap();
+
+        // Get first frame
+        let first_frame = decoder.get_frame();
+        assert!(first_frame.is_some(), "No frames found in test video");
+
+        // Get frame data
+        let first_frame = first_frame.unwrap().unwrap();
+        let width = first_frame.get_width() as usize;
+        let height = first_frame.get_height() as usize;
+        let yuv_data = first_frame.data();
+
+        // Create mozjpeg compressor
+        let mut comp = mozjpeg::Compress::new(mozjpeg::ColorSpace::YUV);
+        comp.set_size(width, height);
+        comp.set_mem_dest();
+        comp.start_compress();
+
+        // Write scanlines
+        comp.write_scanlines(yuv_data);
+        comp.finish_compress();
+
+        // Get compressed jpeg data
+        let jpeg_data = comp.data_to_vec().unwrap();
+        assert!(jpeg_data.len() > 0, "JPEG compression produced no data");
+    }
+
+    #[test]
     fn it_can_decode_frames() {
         let lib = test::get_media_client_lib();
         let client = load(&lib).unwrap();

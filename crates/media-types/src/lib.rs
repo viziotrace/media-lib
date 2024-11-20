@@ -2,6 +2,7 @@ use stabby::boxed::Box;
 use stabby::dynptr;
 use stabby::option::Option;
 use stabby::result::Result;
+use stabby::slice::Slice;
 use stabby::string::String;
 
 #[stabby::stabby]
@@ -61,11 +62,12 @@ pub trait VideoFrame {
     extern "C" fn get_palette_has_changed(&self) -> i32;
     extern "C" fn get_sample_rate(&self) -> i32;
     extern "C" fn get_format(&self) -> i32;
-    extern "C" fn data_ptr(&self) -> *const u8;
-    extern "C" fn data_len(&self) -> usize;
+    extern "C" fn data(&self, idx: usize) -> Slice<u8>;
+    extern "C" fn stride(&self, idx: usize) -> usize;
 }
 
 pub type VideoFrameResult = Result<dynptr!(Box<dyn VideoFrame>), MediaLibError>;
+pub type VideoFrameTrait = dynptr!(Box<dyn VideoFrame>);
 
 #[stabby::stabby]
 #[derive(Debug, Clone)]

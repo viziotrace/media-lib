@@ -7,3 +7,4 @@ edition = "2021"
 clap = { version = "4.5.18", features = ["default", "derive"] }
 media-client = { path = "../media-client" }
 mozjpeg = "0.10.10"
+turbojpeg = "1.1.1"

@@ -37,11 +37,38 @@ mod tests {
                         );
                     }
 
-                    // Verify frame data is valid RGBA
                     let data = frame.video.data(0);
                     assert!(data.len() > 1, "Video frame should have multiple planes");
                     let pix_fmt = frame.video.format();
-                    assert_eq!(pix_fmt, ffmpeg_next::format::Pixel::RGBA);
+                    assert_eq!(pix_fmt, ffmpeg_next::format::Pixel::YUV420P);
+                    // For YUV420p, we should have 3 planes - Y, U, and V
+                    assert_eq!(frame.video.planes(), 3, "YUV420p should have 3 planes");
+
+                    // Basic sanity check - values should be within valid range (0-255)
+                    assert!(
+                        frame.video.data(0).iter().all(|&x| x <= 255),
+                        "Y values out of range"
+                    );
+                    assert!(
+                        frame.video.data(1).iter().all(|&x| x <= 255),
+                        "U values out of range"
+                    );
+                    assert!(
+                        frame.video.data(2).iter().all(|&x| x <= 255),
+                        "V values out of range"
+                    );
+
+                    // For YUV420p:
+                    // Y plane has full resolution (width * height)
+                    // U and V planes are quarter resolution ((width/2) * (height/2))
+                    let (width, height) = (frame.video.width(), frame.video.height());
+                    let y_size = (width * height) as usize;
+                    let uv_size = (width * height / 4) as usize;
+
+                    // Verify plane sizes match expected dimensions
+                    assert_eq!(frame.video.data(0).len(), y_size, "Y plane size mismatch");
+                    assert_eq!(frame.video.data(1).len(), uv_size, "U plane size mismatch");
+                    assert_eq!(frame.video.data(2).len(), uv_size, "V plane size mismatch");
                 }
                 Err(e) => panic!("Failed to decode frame: {}", e),
             }

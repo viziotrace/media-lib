@@ -23,3 +23,6 @@ default = []
 videotoolbox = ["ffmpeg-next/build-videotoolbox"]
 d3d12va = ["ffmpeg-next/build-d3d12va"]
 nvdec = ["ffmpeg-next/build-nvdec"]
+
+[dev-dependencies]
+mozjpeg = "0.10.10"

@@ -170,6 +170,7 @@ impl HardwareAcceleratedVideoDecoder {
             match self.input_context.packets().next() {
                 Some((stream, packet)) => {
                     if stream.index() == self.video_stream_index {
+                        // println!("Got packet, len: {}", packet.data().unwrap().len());
                         return Some(Ok(packet));
                     }
                 }
@@ -197,6 +198,7 @@ impl HardwareAcceleratedVideoDecoder {
         loop {
             match self.decoder.receive_frame(&mut decoded) {
                 Ok(_) => {
+                    println!("Got frame");
                     // Initialize filter graph if needed
                     if self.filter_graph.is_none() {
                         let width = decoded.width();
@@ -225,20 +227,20 @@ impl HardwareAcceleratedVideoDecoder {
                             Ok(graph) => self.filter_graph = Some(graph),
                             Err(e) => return Some(Err(e)),
                         }
-
-                        // Process frame through hardware filter
-                        if let Some(ref mut graph) = self.filter_graph {
-                            return Some(
-                                graph
-                                    .process_frame(&mut decoded)
-                                    .map(|frame| DecodedVideoFrame { video: frame }),
-                            );
-                        }
+                    }
+                    // Process frame through hardware filter
+                    if let Some(ref mut graph) = self.filter_graph {
+                        return Some(
+                            graph
+                                .process_frame(&mut decoded)
+                                .map(|frame| DecodedVideoFrame { video: frame }),
+                        );
                     }
                 }
                 Err(ffmpeg_next::Error::Other { errno }) if errno == NEED_MORE_DATA => {
                     match self.get_next_video_packet() {
                         Some(Ok(packet)) => {
+                            println!("Sending packet, len: {}", packet.data().unwrap().len());
                             if let Err(e) = self.decoder.send_packet(&packet) {
                                 return Some(Err(MediaLibError::FFmpegError(StabbyString::from(
                                     e.to_string(),

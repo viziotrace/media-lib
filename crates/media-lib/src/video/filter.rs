@@ -429,7 +429,7 @@ impl FilterGraph {
         match device_type {
             Some(ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA) => {
                 let filter_str = format!(
-                    "hwupload_cuda,scale_cuda={}:{},hwdownload_cuda",
+                    "hwupload_cuda,scale_cuda={}:{},hwdownload_cuda,format=yuv420p",
                     target_width, target_height
                 );
                 debug!("Created CUDA filter string: {}", filter_str);
@@ -438,7 +438,7 @@ impl FilterGraph {
             Some(ffmpeg_next::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX) => {
                 if let Some(pix_fmt) = pix_fmt {
                     let filter_str = format!(
-                        "format={},hwupload,scale_vt={}:{},hwdownload,format=nv12,format=rgba",
+                        "format={},hwupload,scale_vt={}:{},hwdownload,format=nv12,format=yuv420p",
                         pix_fmt as i32, target_width, target_height
                     );
                     debug!("Created VideoToolbox filter string: {}", filter_str);
@@ -452,7 +452,7 @@ impl FilterGraph {
             }
             _ => {
                 debug!("Using software scaling fallback");
-                let filter_str = format!("scale={}:{},format=rgba", target_width, target_height);
+                let filter_str = format!("scale={}:{},format=yuv420p", target_width, target_height);
                 debug!("Created software filter string: {}", filter_str);
                 Ok(filter_str)
             }

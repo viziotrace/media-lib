@@ -13,7 +13,6 @@ mod hardware;
 #[cfg(test)]
 mod tests;
 mod types;
-
 pub use decoder::HardwareAcceleratedVideoDecoder;
 pub use hardware::HardwareContext;
 pub use types::{DecodedVideoFrame, VideoSize};

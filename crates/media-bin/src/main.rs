@@ -1,31 +1,50 @@
 use clap::{Parser, Subcommand};
 use media_client::load;
-use media_client::media_types::{MediaFrameDecoderDynMut, VideoFrameDyn, VideoSize};
+use media_client::media_types::{
+    MediaFrameDecoderDynMut, VideoFrameDyn, VideoFrameTrait, VideoSize,
+};
 use std::fs;
 use std::path::Path;
+use turbojpeg::{Compressor, Subsamp};
 
-fn get_jpeg_buffer(slice: &[u8], width: u32, height: u32) -> Result<Vec<u8>, std::io::Error> {
-    match std::panic::catch_unwind(|| {
-        let mut comp = mozjpeg::Compress::new(mozjpeg::ColorSpace::JCS_EXT_RGBA);
+fn get_jpeg_buffer(
+    frame: VideoFrameTrait,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, std::io::Error> {
+    // Log frame information
+    println!("Frame dimensions: {}x{}", width, height);
 
-        comp.set_size(width as usize, height as usize);
-        let mut comp = comp.start_compress(Vec::new()).unwrap(); // any io::Write will work
+    let mut compressor = Compressor::new().map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::Other, format!("TurboJPEG error: {}", e))
+    })?;
 
-        println!("Writing {} bytes to jpeg", slice.len());
-        // replace with your image data
-        comp.write_scanlines(&slice).unwrap();
+    // For YUV420p, the U and V planes are quarter size of Y plane
+    let y_size = frame.stride(0) * height as usize;
+    let uv_size = frame.stride(1) * ((height as usize + 1) / 2);
 
-        match comp.finish() {
-            Ok(buf) => Ok(buf),
-            Err(e) => panic!("Failed to finish jpeg compression: {}", e),
-        }
-    }) {
-        Ok(result) => result,
-        Err(err) => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("JPEG compression panicked: {:?}", err),
-        )),
-    }
+    let mut pixels = Vec::with_capacity(y_size + 2 * uv_size);
+    pixels.extend_from_slice(frame.data(0).as_slice());
+    pixels.extend_from_slice(frame.data(1).as_slice());
+    pixels.extend_from_slice(frame.data(2).as_slice());
+
+    // Create YUV image with proper alignment for each plane
+    let yuv_image = turbojpeg::YuvImage {
+        pixels,
+        width: width as usize,
+        height: height as usize,
+        subsamp: Subsamp::Sub2x2, // YUV420p uses 2x2 subsampling
+        align: 1,                 // Use 1-byte alignment since we're concatenating the planes
+    };
+
+    compressor
+        .compress_yuv_to_vec(yuv_image.as_deref())
+        .map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("JPEG compression failed: {}", e),
+            )
+        })
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -84,22 +103,19 @@ fn main() {
             loop {
                 let frame = decoder.get_frame();
                 if frame.is_none() {
+                    println!("No frame");
                     break;
                 }
+                println!("Got frame {}", i);
                 let frame_result = frame.unwrap().unwrap();
+                println!("Frame length: {}", frame_result.data(0).len());
 
                 // Only save key frames
                 if frame_result.get_key_frame() == 1 {
-                    let frame_data = unsafe {
-                        std::slice::from_raw_parts(frame_result.data_ptr(), frame_result.data_len())
-                    };
+                    let width = frame_result.get_width();
+                    let height = frame_result.get_height();
                     let output_path = Path::new(&output_dir).join(format!("{}.jpeg", i));
-                    let jpeg_buffer = get_jpeg_buffer(
-                        frame_data,
-                        frame_result.get_width(),
-                        frame_result.get_height(),
-                    )
-                    .unwrap();
+                    let jpeg_buffer = get_jpeg_buffer(frame_result, width, height).unwrap();
                     fs::write(output_path, jpeg_buffer).expect("Failed to write JPEG file");
                     i += 1;
                 }
