@@ -12,29 +12,45 @@ fn get_jpeg_buffer(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, std::io::Error> {
-    // Log frame information
     println!("Frame dimensions: {}x{}", width, height);
 
     let mut compressor = Compressor::new().map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::Other, format!("TurboJPEG error: {}", e))
     })?;
 
-    // For YUV420p, the U and V planes are quarter size of Y plane
-    let y_size = frame.stride(0) * height as usize;
-    let uv_size = frame.stride(1) * ((height as usize + 1) / 2);
+    // Calculate actual data sizes without padding
+    let y_height = height as usize;
+    let uv_height = (height as usize + 1) / 2;
 
-    let mut pixels = Vec::with_capacity(y_size + 2 * uv_size);
-    pixels.extend_from_slice(frame.data(0).as_slice());
-    pixels.extend_from_slice(frame.data(1).as_slice());
-    pixels.extend_from_slice(frame.data(2).as_slice());
+    let mut pixels = Vec::new();
 
-    // Create YUV image with proper alignment for each plane
+    // Copy Y plane line by line to remove padding
+    for y in 0..y_height {
+        let line_start = y * frame.stride(0);
+        let line_end = line_start + width as usize;
+        pixels.extend_from_slice(&frame.data(0)[line_start..line_end]);
+    }
+
+    // Copy U plane line by line
+    for y in 0..uv_height {
+        let line_start = y * frame.stride(1);
+        let line_end = line_start + (width as usize + 1) / 2;
+        pixels.extend_from_slice(&frame.data(1)[line_start..line_end]);
+    }
+
+    // Copy V plane line by line
+    for y in 0..uv_height {
+        let line_start = y * frame.stride(2);
+        let line_end = line_start + (width as usize + 1) / 2;
+        pixels.extend_from_slice(&frame.data(2)[line_start..line_end]);
+    }
+
     let yuv_image = turbojpeg::YuvImage {
         pixels,
         width: width as usize,
         height: height as usize,
-        subsamp: Subsamp::Sub2x2, // YUV420p uses 2x2 subsampling
-        align: 1,                 // Use 1-byte alignment since we're concatenating the planes
+        subsamp: Subsamp::Sub2x2,
+        align: 1,
     };
 
     compressor
