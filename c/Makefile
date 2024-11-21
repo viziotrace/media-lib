@@ -9,7 +9,7 @@ FRAMEWORKS = -framework VideoToolbox \
             -framework Accelerate
 
 TARGET = decode-videotoolbox
-SRCS = decode-videotoolbox.c main.c mp4.c
+SRCS = decode-videotoolbox.c main.c mp4.c log.c
 OBJS = $(SRCS:.c=.o)
 
 all: $(TARGET)

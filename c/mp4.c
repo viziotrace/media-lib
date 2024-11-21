@@ -2,7 +2,7 @@
 #include <string.h>
 #include <arpa/inet.h> // For ntohl, ntohs
 #include "mp4.h"
-#include <stdio.h>
+#include "log.h"
 
 // Define box type constants
 #define BOX_TYPE_MOOV 0x6D6F6F76 // 'moov'
@@ -29,29 +29,6 @@ static int parse_avcC_box(FILE *file, MP4Context *ctx, long offset);
 static int parse_video_info(FILE *file, MP4Context *ctx, long stsd_offset);
 static int parse_mdhd_box(FILE *file, MP4Context *ctx, long offset);
 static int parse_stsc_box(FILE *file, MP4Context *ctx, long offset);
-
-// Add these at the top after includes
-#define DEBUG_LOG(fmt, ...)                                \
-    do                                                     \
-    {                                                      \
-        if (getenv("MP4_DEBUG"))                           \
-        {                                                  \
-            fprintf(stderr, "[MP4Debug] %s:%d: " fmt "\n", \
-                    __func__, __LINE__, ##__VA_ARGS__);    \
-        }                                                  \
-    } while (0)
-
-#define DEBUG_BOX(box_type, offset)                                             \
-    do                                                                          \
-    {                                                                           \
-        if (getenv("MP4_DEBUG"))                                                \
-        {                                                                       \
-            char fourcc[5];                                                     \
-            fourcc_to_string(box_type, fourcc);                                 \
-            fprintf(stderr, "[MP4Debug] %s:%d: Found '%s' box at offset %ld\n", \
-                    __func__, __LINE__, fourcc, offset);                        \
-        }                                                                       \
-    } while (0)
 
 // Helper function to read a 32-bit big-endian integer
 // static uint32_t read_uint32(FILE* fp) {
@@ -81,7 +58,7 @@ static int read_box_header(FILE *file, MP4BoxHeader *header)
 
     if (current_pos + 8 > file_size)
     {
-        DEBUG_LOG("Not enough bytes left to read box header at offset %ld", current_pos);
+        ERROR_LOG("Not enough bytes left to read box header at offset %ld", current_pos);
         return 0;
     }
 
@@ -95,7 +72,7 @@ static int read_box_header(FILE *file, MP4BoxHeader *header)
     // Validate size
     if (header->size < 8 && header->size != 1)
     { // Box size must be at least 8 bytes
-        DEBUG_LOG("Invalid box size %u at offset %ld", header->size, current_pos);
+        ERROR_LOG("Invalid box size %u at offset %ld", header->size, current_pos);
         return 0;
     }
 
@@ -107,7 +84,7 @@ static int read_box_header(FILE *file, MP4BoxHeader *header)
     { // 64-bit size
         if (current_pos + 16 > file_size)
         { // Check if we can read the large size
-            DEBUG_LOG("Not enough bytes left to read large size at offset %ld", current_pos);
+            ERROR_LOG("Not enough bytes left to read large size at offset %ld", current_pos);
             return 0;
         }
         if (fread(&header->largesize, 1, 8, file) != 8)
@@ -116,7 +93,7 @@ static int read_box_header(FILE *file, MP4BoxHeader *header)
                             ntohl((uint32_t)header->largesize);
         if (header->largesize < 16)
         { // Large size box must be at least 16 bytes
-            DEBUG_LOG("Invalid large size %llu at offset %ld",
+            ERROR_LOG("Invalid large size %llu at offset %ld",
                       (unsigned long long)header->largesize, current_pos);
             return 0;
         }
@@ -469,7 +446,7 @@ MP4Box *create_box_tree(FILE *file, long start_offset, long end_offset, MP4Box *
     long file_size = ftell(file);
     if (start_offset < 0 || end_offset > file_size || start_offset >= end_offset)
     {
-        DEBUG_LOG("Invalid offset range: start=%ld, end=%ld, file_size=%ld",
+        ERROR_LOG("Invalid offset range: start=%ld, end=%ld, file_size=%ld",
                   start_offset, end_offset, file_size);
         return NULL;
     }
@@ -484,14 +461,14 @@ MP4Box *create_box_tree(FILE *file, long start_offset, long end_offset, MP4Box *
         fseek(file, current_offset, SEEK_SET);
         if (!read_box_header(file, &header))
         {
-            DEBUG_LOG("Failed to read box header at offset %ld", current_offset);
+            ERROR_LOG("Failed to read box header at offset %ld", current_offset);
             break;
         }
 
         // Validate box size
         if (header.largesize < 8 || current_offset + header.largesize > end_offset)
         {
-            DEBUG_LOG("Invalid box size: %llu at offset %ld (end_offset=%ld)",
+            ERROR_LOG("Invalid box size: %llu at offset %ld (end_offset=%ld)",
                       (unsigned long long)header.largesize, current_offset, end_offset);
             break;
         }
@@ -537,7 +514,7 @@ MP4Box *create_box_tree(FILE *file, long start_offset, long end_offset, MP4Box *
 
     if (box_count >= max_boxes)
     {
-        DEBUG_LOG("Reached maximum box count limit at offset %ld", current_offset);
+        ERROR_LOG("Reached maximum box count limit at offset %ld", current_offset);
     }
 
     return first_box;
@@ -682,7 +659,7 @@ MP4Context *mp4_open(const char *filename)
     FILE *file = fopen(filename, "rb");
     if (!file)
     {
-        DEBUG_LOG("Failed to open file: %s", filename);
+        ERROR_LOG("Failed to open file: %s", filename);
         return NULL;
     }
 
@@ -704,7 +681,7 @@ MP4Context *mp4_open(const char *filename)
     MP4Box *root = create_box_tree(file, 0, ctx->file_size, NULL);
     if (!root)
     {
-        DEBUG_LOG("Failed to create box tree");
+        ERROR_LOG("Failed to create box tree");
         goto error;
     }
 
@@ -712,7 +689,7 @@ MP4Context *mp4_open(const char *filename)
     MP4Box *moov = find_box_by_type(root, BOX_TYPE_MOOV);
     if (!moov)
     {
-        DEBUG_LOG("Failed to find moov box");
+        ERROR_LOG("Failed to find moov box");
         goto error;
     }
 
@@ -727,7 +704,7 @@ MP4Context *mp4_open(const char *filename)
             MP4Box *mdhd = find_box_by_type(mdia, BOX_TYPE_MDHD);
             if (mdhd && parse_mdhd_box(file, ctx, mdhd->offset) != 0)
             {
-                DEBUG_LOG("Failed to parse mdhd box");
+                ERROR_LOG("Failed to parse mdhd box");
                 goto error;
             }
 
@@ -745,7 +722,7 @@ MP4Context *mp4_open(const char *filename)
                         MP4Box *stsd = find_box_by_type(stbl, BOX_TYPE_STSD);
                         if (stsd && parse_video_info(file, ctx, stsd->offset) != 0)
                         {
-                            DEBUG_LOG("Failed to parse video info");
+                            ERROR_LOG("Failed to parse video info");
                             goto error;
                         }
 
@@ -753,7 +730,7 @@ MP4Context *mp4_open(const char *filename)
                         MP4Box *stsz = find_box_by_type(stbl, BOX_TYPE_STSZ);
                         if (stsz && parse_stsz_box(file, ctx, stsz->offset) != 0)
                         {
-                            DEBUG_LOG("Failed to parse stsz box");
+                            ERROR_LOG("Failed to parse stsz box");
                             goto error;
                         }
 
@@ -761,7 +738,7 @@ MP4Context *mp4_open(const char *filename)
                         MP4Box *stco = find_box_by_type(stbl, BOX_TYPE_STCO);
                         if (stco && parse_stco_box(file, ctx, stco->offset) != 0)
                         {
-                            DEBUG_LOG("Failed to parse stco box");
+                            ERROR_LOG("Failed to parse stco box");
                             goto error;
                         }
 
@@ -769,7 +746,7 @@ MP4Context *mp4_open(const char *filename)
                         MP4Box *stsc = find_box_by_type(stbl, BOX_TYPE_STSC);
                         if (stsc && parse_stsc_box(file, ctx, stsc->offset) != 0)
                         {
-                            DEBUG_LOG("Failed to parse stsc box");
+                            ERROR_LOG("Failed to parse stsc box");
                             goto error;
                         }
                     }
@@ -880,7 +857,7 @@ MP4Status read_next_sample(MP4Context *ctx, MP4Sample *sample)
     // Validate sample size and offset
     if (size == 0 || offset + size > ctx->file_size)
     {
-        DEBUG_LOG("Invalid sample size or offset: size=%u, offset=%llu, file_size=%llu",
+        ERROR_LOG("Invalid sample size or offset: size=%u, offset=%llu, file_size=%llu",
                   size, (unsigned long long)offset, (unsigned long long)ctx->file_size);
         return MP4_ERROR_INVALID_PARAM;
     }
@@ -901,7 +878,7 @@ MP4Status read_next_sample(MP4Context *ctx, MP4Sample *sample)
     size_t bytes_read = fread(sample->data, 1, size, ctx->file);
     if (bytes_read != size)
     {
-        DEBUG_LOG("Failed to read sample: expected %u bytes, got %zu",
+        ERROR_LOG("Failed to read sample: expected %u bytes, got %zu",
                   size, bytes_read);
         free(sample->data);
         return feof(ctx->file) ? MP4_ERROR_EOF : MP4_ERROR_IO;

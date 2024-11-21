@@ -4,6 +4,7 @@
 #include <errno.h>
 #include "mp4.h"
 #include "decode-videotoolbox.h"
+#include "log.h"
 
 // Create directory if it doesn't exist
 static int ensure_directory_exists(const char *path)
@@ -17,53 +18,53 @@ static int ensure_directory_exists(const char *path)
     // Create directory with permissions 0755
     if (mkdir(path, 0755) != 0)
     {
-        printf("Failed to create directory %s: %s\n", path, strerror(errno));
+        INFO_LOG("Failed to create directory %s: %s", path, strerror(errno));
         return -1;
     }
     return 0;
 }
 
 // Helper function to print track type
-static const char *track_type_to_string(TrackType type)
-{
-    switch (type)
-    {
-    case TRACK_TYPE_VIDEO:
-        return "Video";
-    case TRACK_TYPE_AUDIO:
-        return "Audio";
-    default:
-        return "Unknown";
-    }
-}
+// static const char *track_type_to_string(TrackType type)
+// {
+//     switch (type)
+//     {
+//     case TRACK_TYPE_VIDEO:
+//         return "Video";
+//     case TRACK_TYPE_AUDIO:
+//         return "Audio";
+//     default:
+//         return "Unknown";
+//     }
+// }
 
 // Helper function to print sample information
-static void print_sample_info(const MP4Sample *sample, int index)
-{
-    printf("\nSample %d:\n", index);
-    printf("├─ Track Type: %s\n", track_type_to_string(sample->track_type));
-    printf("├─ Track ID: %u\n", sample->track_id);
-    printf("├─ Size: %zu bytes\n", sample->size);
-    printf("├─ Timescale: %u\n", sample->timescale);
-    printf("├─ PTS: %lld/%d (%.3f seconds)\n",
-           sample->pts.value, sample->pts.timescale,
-           (float)sample->pts.value / sample->pts.timescale);
+// static void print_sample_info(const MP4Sample *sample, int index)
+// {
+//     printf("\nSample %d:\n", index);
+//     printf("├─ Track Type: %s\n", track_type_to_string(sample->track_type));
+//     printf("├─ Track ID: %u\n", sample->track_id);
+//     printf("├─ Size: %zu bytes\n", sample->size);
+//     printf("├─ Timescale: %u\n", sample->timescale);
+//     printf("├─ PTS: %lld/%d (%.3f seconds)\n",
+//            sample->pts.value, sample->pts.timescale,
+//            (float)sample->pts.value / sample->pts.timescale);
 
-    // Add hex dump of first 16 bytes (or less if sample is smaller)
-    printf("└─ First bytes: ");
-    const size_t bytes_to_show = sample->size < 16 ? sample->size : 16;
-    for (size_t i = 0; i < bytes_to_show; i++)
-    {
-        printf("%02x ", (unsigned char)sample->data[i]);
-    }
-    printf("\n");
-}
+//     // Add hex dump of first 16 bytes (or less if sample is smaller)
+//     printf("└─ First bytes: ");
+//     const size_t bytes_to_show = sample->size < 16 ? sample->size : 16;
+//     for (size_t i = 0; i < bytes_to_show; i++)
+//     {
+//         printf("%02x ", (unsigned char)sample->data[i]);
+//     }
+//     printf("\n");
+// }
 
 int main(int argc, char *argv[])
 {
     if (argc != 3)
     {
-        printf("Usage: %s <input_file> <output_directory>\n", argv[0]);
+        INFO_LOG("Usage: %s <input_file> <output_directory>", argv[0]);
         return 1;
     }
 
@@ -73,7 +74,7 @@ int main(int argc, char *argv[])
     // Ensure output directory exists
     if (ensure_directory_exists(output_dir) != 0)
     {
-        printf("Failed to create or access output directory: %s\n", output_dir);
+        INFO_LOG("Failed to create or access output directory: %s", output_dir);
         return 1;
     }
 
@@ -81,23 +82,23 @@ int main(int argc, char *argv[])
     MP4Context *mp4_ctx = mp4_open(input_file);
     if (!mp4_ctx)
     {
-        printf("Failed to open MP4 file\n");
+        INFO_LOG("Failed to open MP4 file");
         return 1;
     }
 
     // Print video parameters
-    printf("\nVideo Parameters:\n");
-    printf("├─ Width: %u\n", mp4_ctx->h264_params.width);
-    printf("├─ Height: %u\n", mp4_ctx->h264_params.height);
-    printf("├─ SPS size: %zu bytes\n", mp4_ctx->h264_params.sps_size);
-    printf("└─ PPS size: %zu bytes\n", mp4_ctx->h264_params.pps_size);
+    INFO_LOG("Video Parameters:");
+    INFO_LOG("├─ Width: %u", mp4_ctx->h264_params.width);
+    INFO_LOG("├─ Height: %u", mp4_ctx->h264_params.height);
+    INFO_LOG("├─ SPS size: %zu bytes", mp4_ctx->h264_params.sps_size);
+    INFO_LOG("└─ PPS size: %zu bytes", mp4_ctx->h264_params.pps_size);
 
     // Initialize decoder with parameters from MP4 context
     VideoDecoder decoder;
     DecoderStatus status = init_decoder(&decoder, output_dir, mp4_ctx);
     if (status != DECODER_SUCCESS)
     {
-        printf("Failed to initialize decoder\n");
+        INFO_LOG("Failed to initialize decoder");
         mp4_close(mp4_ctx);
         return 1;
     }
@@ -119,20 +120,20 @@ int main(int argc, char *argv[])
         }
         else if (mp4_status != MP4_SUCCESS)
         {
-            printf("Failed to read sample %d\n", sample_index);
+            INFO_LOG("Failed to read sample %d", sample_index);
             break;
         }
 
         if (!sample.data)
         {
-            printf("Error: Sample data allocation failed\n");
+            INFO_LOG("Error: Sample data allocation failed");
             cleanup_decoder(&decoder);
             mp4_close(mp4_ctx);
             return 1;
         }
 
         // Print sample information
-        print_sample_info(&sample, sample_index);
+        // print_sample_info(&sample, sample_index);
 
         // Update statistics
         total_bytes += sample.size;
@@ -142,7 +143,7 @@ int main(int argc, char *argv[])
             status = decode_frame(&decoder, sample.data, sample.size, sample.pts);
             if (status != DECODER_SUCCESS)
             {
-                printf("Failed to decode video sample %d\n", sample_index);
+                INFO_LOG("Failed to decode video sample %d", sample_index);
                 free_sample(&sample);
                 break;
             }
@@ -160,11 +161,11 @@ int main(int argc, char *argv[])
     flush_decoder(&decoder);
 
     // Print final statistics
-    printf("\nProcessing complete!\n");
-    printf("Total samples processed: %d\n", sample_index);
-    printf("├─ Video samples: %d\n", video_samples);
-    printf("├─ Audio samples: %d\n", audio_samples);
-    printf("└─ Total data processed: %.2f MB\n", (float)total_bytes / (1024 * 1024));
+    INFO_LOG("Processing complete!");
+    INFO_LOG("Total samples processed: %d", sample_index);
+    INFO_LOG("├─ Video samples: %d", video_samples);
+    INFO_LOG("├─ Audio samples: %d", audio_samples);
+    INFO_LOG("└─ Total data processed: %.2f MB", (float)total_bytes / (1024 * 1024));
 
     // Cleanup
     cleanup_decoder(&decoder);

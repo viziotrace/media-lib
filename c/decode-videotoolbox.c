@@ -7,6 +7,7 @@
 #include <CoreVideo/CoreVideo.h>
 #include <VideoToolbox/VideoToolbox.h>
 #include <Accelerate/Accelerate.h>
+#include "log.h"
 
 // Add these H.264 NAL unit type definitions
 #define H264_NAL_SLICE 1
@@ -22,7 +23,8 @@ static int validate_h264_sample(const uint8_t *data, size_t size, uint8_t nal_le
     size_t offset = 0;
     int valid_nals_found = 0;
 
-    printf("Validating H.264 sample (size: %zu, NAL length size: %u)\n", size, nal_length_size);
+    DEBUG_LOG("Validating H.264 sample (size: %zu, NAL length size: %u)",
+              size, nal_length_size);
 
     while (offset + nal_length_size <= size)
     {
@@ -43,25 +45,20 @@ static int validate_h264_sample(const uint8_t *data, size_t size, uint8_t nal_le
             }
         }
 
-        // Print the raw bytes for debugging
-        printf("NAL length bytes at offset %zu: ", offset);
-        for (int i = 0; i < nal_length_size; i++)
-        {
-            printf("%02x ", data[offset + i]);
-        }
-        printf("-> size=%u\n", nal_size);
+        // Replace printf with DEBUG_LOG
+        DEBUG_LOG("NAL length bytes at offset %zu: %02x %02x %02x %02x -> size=%u",
+                  offset, data[offset], data[offset + 1], data[offset + 2], data[offset + 3], nal_size);
 
         // Validate NAL unit size
         if (nal_size == 0 || offset + nal_length_size + nal_size > size)
         {
-            printf("Invalid NAL unit size: %u at offset %zu (total size: %zu)\n",
-                   nal_size, offset, size);
+            ERROR_LOG("Invalid NAL unit size: %u at offset %zu (total size: %zu)",
+                      nal_size, offset, size);
             return 0;
         }
 
-        // Get NAL unit type
         uint8_t nal_type = data[offset + nal_length_size] & 0x1F;
-        printf("NAL unit at offset %zu: size=%u, type=%u\n", offset, nal_size, nal_type);
+        DEBUG_LOG("NAL unit at offset %zu: size=%u, type=%u", offset, nal_size, nal_type);
 
         // Validate NAL unit type
         switch (nal_type)
@@ -75,29 +72,26 @@ static int validate_h264_sample(const uint8_t *data, size_t size, uint8_t nal_le
             valid_nals_found++;
             break;
         default:
-            printf("Warning: Unknown NAL unit type: %u\n", nal_type);
+            WARN_LOG("Unknown NAL unit type: %u", nal_type);
             break;
         }
 
-        // Move to next NAL unit
         offset += nal_length_size + nal_size;
     }
 
-    // Check if we found any valid NAL units
     if (valid_nals_found == 0)
     {
-        printf("No valid NAL units found in sample\n");
+        ERROR_LOG("No valid NAL units found in sample");
         return 0;
     }
 
-    // Check if we consumed exactly all bytes
     if (offset != size)
     {
-        printf("Warning: Sample size mismatch. Consumed %zu of %zu bytes\n", offset, size);
+        WARN_LOG("Sample size mismatch. Consumed %zu of %zu bytes", offset, size);
         return 0;
     }
 
-    printf("Sample validation successful: found %d valid NAL units\n", valid_nals_found);
+    DEBUG_LOG("Sample validation successful: found %d valid NAL units", valid_nals_found);
     return 1;
 }
 
@@ -112,7 +106,7 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
 {
     if (status != noErr || imageBuffer == NULL)
     {
-        printf("Decoder callback error: %d (0x%x)\n", (int)status, (int)status);
+        ERROR_LOG("Decoder callback error: %d (0x%x)", (int)status, (int)status);
         return;
     }
 
@@ -185,7 +179,7 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
 
     if (error != kvImageNoError)
     {
-        printf("vImage conversion error: %ld\n", error);
+        ERROR_LOG("vImage conversion error: %ld", error);
         free(rgbData);
         CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
         return;
@@ -204,7 +198,7 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
 
     if (!context)
     {
-        printf("Failed to create bitmap context\n");
+        ERROR_LOG("Failed to create bitmap context");
         CGColorSpaceRelease(colorSpace);
         free(rgbData);
         CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
@@ -214,7 +208,7 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
     CGImageRef cgImage = CGBitmapContextCreateImage(context);
     if (!cgImage)
     {
-        printf("Failed to create CGImage\n");
+        ERROR_LOG("Failed to create CGImage");
         CGContextRelease(context);
         CGColorSpaceRelease(colorSpace);
         free(rgbData);
@@ -294,7 +288,7 @@ DecoderStatus init_decoder(VideoDecoder *decoder,
 
     if (status != noErr)
     {
-        printf("Failed to create format description: %d\n", (int)status);
+        ERROR_LOG("Failed to create format description: %d", (int)status);
         return DECODER_ERROR_INIT;
     }
 
@@ -328,13 +322,13 @@ DecoderStatus init_decoder(VideoDecoder *decoder,
 
     if (status != noErr)
     {
-        printf("Failed to create decompression session: %d\n", (int)status);
+        ERROR_LOG("Failed to create decompression session: %d", (int)status);
         return DECODER_ERROR_INIT;
     }
 
     // Print video information
     CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(decoder->format_desc);
-    printf("Created decoder for video: %dx%d\n", dimensions.width, dimensions.height);
+    INFO_LOG("Created decoder for video: %dx%d", dimensions.width, dimensions.height);
 
     return DECODER_SUCCESS;
 }
@@ -361,7 +355,7 @@ DecoderStatus decode_frame(VideoDecoder *decoder, const uint8_t *data, size_t si
     // Validate H.264 sample
     if (!validate_h264_sample(data, size, nal_length_size))
     {
-        printf("H.264 sample validation failed\n");
+        ERROR_LOG("H.264 sample validation failed");
         return DECODER_ERROR_DECODE;
     }
 
