@@ -17,10 +17,7 @@ typedef struct {
 } VideoDecoder;
 
 // Initialize the decoder with H.264 parameters
-DecoderStatus init_decoder(VideoDecoder* decoder, 
-                         const char* output_directory,
-                         const uint8_t* sps, size_t sps_size,
-                         const uint8_t* pps, size_t pps_size);
+DecoderStatus init_decoder(VideoDecoder* decoder, const char* output_directory, MP4Context* mp4_ctx);
 
 // Decode a video frame
 DecoderStatus decode_frame(VideoDecoder* decoder, const uint8_t* data, size_t size, CMTime pts);

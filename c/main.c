@@ -3,7 +3,6 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include "mp4.h"
-#include "h264.h"
 #include "decode-videotoolbox.h"
 
 // Create directory if it doesn't exist
@@ -68,114 +67,39 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // First pass: Parse H.264 parameters
+    // Open and parse MP4 file
     MP4Context* mp4_ctx = mp4_open(input_file);
     if (!mp4_ctx) {
         printf("Failed to open MP4 file\n");
         return 1;
     }
 
-    int sample_index = 0;
-    H264Context* h264_ctx = h264_context_create();
-    if (!h264_ctx) {
-        printf("Failed to create H.264 context\n");
-        mp4_close(mp4_ctx);
-        return 1;
-    }
+    // Print video parameters
+    printf("\nVideo Parameters:\n");
+    printf("├─ Width: %u\n", mp4_ctx->h264_params.width);
+    printf("├─ Height: %u\n", mp4_ctx->h264_params.height);
+    printf("├─ SPS size: %zu bytes\n", mp4_ctx->h264_params.sps_size);
+    printf("└─ PPS size: %zu bytes\n", mp4_ctx->h264_params.pps_size);
 
-    // Read samples until we find SPS and PPS
-    MP4Sample sample;
-    const int MAX_SAMPLES = 1000000;  // Safety limit
-    while (sample_index < MAX_SAMPLES) {
-        MP4Status status = read_next_sample(mp4_ctx, &sample);
-
-        printf("\nReading sample %d...\n", sample_index);
-        printf("├─ Status: %s\n", status == MP4_SUCCESS ? "Success" : 
-                                 status == MP4_ERROR_EOF ? "End of File" :
-                                 status == MP4_ERROR_IO ? "Read Error" :
-                                 status == MP4_ERROR_MEMORY ? "Memory Error" : "Unknown Error");
-        if (status == MP4_SUCCESS) {
-            print_sample_info(&sample, sample_index);
-        }
-        sample_index++;
-
-        if (status == MP4_ERROR_EOF) {
-            printf("Reached end of file without finding SPS and PPS\n");
-            h264_context_free(h264_ctx);
-            mp4_close(mp4_ctx);
-            return 1;
-        }
-
-        if (status != MP4_SUCCESS) {
-            printf("Error reading sample: %s\n", 
-                   status == MP4_ERROR_IO ? "I/O Error" :
-                   status == MP4_ERROR_MEMORY ? "Memory Error" :
-                   status == MP4_ERROR_FORMAT ? "Format Error" :
-                   status == MP4_ERROR_INVALID_PARAM ? "Invalid Parameter" :
-                   "Unknown Error");
-            h264_context_free(h264_ctx);
-            mp4_close(mp4_ctx);
-            return 1;
-        }
-
-        if (!sample.data) {
-            printf("Error: Sample data allocation failed\n");
-            free_sample(&sample);
-            h264_context_free(h264_ctx);
-            mp4_close(mp4_ctx);
-            return 1;
-        }
-
-        if (sample.track_type == TRACK_TYPE_VIDEO) {
-            H264Status status = h264_parse_sample(h264_ctx, sample.data, sample.size);
-            if (status != H264_SUCCESS) {
-                printf("Error parsing H.264 sample\n");
-                free_sample(&sample);
-                h264_context_free(h264_ctx);
-                mp4_close(mp4_ctx);
-                return 1;
-            }
-            if (h264_ctx->sps && h264_ctx->pps) {
-                // Found both SPS and PPS
-                free_sample(&sample);
-                break;
-            }
-        }
-        free_sample(&sample);
-    }
-
-    if (sample_index >= MAX_SAMPLES) {
-        printf("Error: Exceeded maximum sample limit without finding SPS and PPS\n");
-        h264_context_free(h264_ctx);
-        mp4_close(mp4_ctx);
-        return 1;
-    }
-
-    // Reset MP4 context for second pass
-    mp4_close(mp4_ctx);
-    mp4_ctx = mp4_open(input_file);
-
-    // Initialize decoder with H.264 parameters
-    MP4Status mp4_status;
+    // Initialize decoder with parameters from MP4 context
     VideoDecoder decoder;
-    DecoderStatus status = init_decoder(&decoder, output_dir, 
-                                      h264_ctx->sps, h264_ctx->sps_size,
-                                      h264_ctx->pps, h264_ctx->pps_size);
+    DecoderStatus status = init_decoder(&decoder, output_dir, mp4_ctx);
     if (status != DECODER_SUCCESS) {
         printf("Failed to initialize decoder\n");
-        h264_context_free(h264_ctx);
         mp4_close(mp4_ctx);
         return 1;
     }
 
-    // Second pass: Process all samples
-    sample_index = 0;
+    // Process all samples
+    int sample_index = 0;
     int video_samples = 0;
     int audio_samples = 0;
     size_t total_bytes = 0;
+    const int MAX_SAMPLES = 1000000;  // Safety limit
+    MP4Sample sample;
     
     while (sample_index < MAX_SAMPLES) {
-        mp4_status = read_next_sample(mp4_ctx, &sample);
+        MP4Status mp4_status = read_next_sample(mp4_ctx, &sample);
         if (mp4_status == MP4_ERROR_EOF) {
             break;
         } else if (mp4_status != MP4_SUCCESS) {
@@ -186,7 +110,6 @@ int main(int argc, char *argv[]) {
         if (!sample.data) {
             printf("Error: Sample data allocation failed\n");
             cleanup_decoder(&decoder);
-            h264_context_free(h264_ctx);
             mp4_close(mp4_ctx);
             return 1;
         }
@@ -212,13 +135,8 @@ int main(int argc, char *argv[]) {
         sample_index++;
     }
 
-    if (sample_index >= MAX_SAMPLES) {
-        printf("Error: Exceeded maximum sample limit\n");
-        cleanup_decoder(&decoder);
-        h264_context_free(h264_ctx);
-        mp4_close(mp4_ctx);
-        return 1;
-    }
+    // Flush decoder
+    // flush_decoder(&decoder);
 
     // Print final statistics
     printf("\nProcessing complete!\n");
@@ -229,7 +147,6 @@ int main(int argc, char *argv[]) {
 
     // Cleanup
     cleanup_decoder(&decoder);
-    h264_context_free(h264_ctx);
     mp4_close(mp4_ctx);
     return 0;
 }
