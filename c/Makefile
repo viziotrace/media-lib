@@ -5,7 +5,8 @@ FRAMEWORKS = -framework VideoToolbox \
             -framework CoreFoundation \
             -framework CoreGraphics \
             -framework CoreVideo \
-            -framework ImageIO
+            -framework ImageIO \
+            -framework Accelerate
 
 TARGET = decode-videotoolbox
 SRCS = decode-videotoolbox.c main.c mp4.c

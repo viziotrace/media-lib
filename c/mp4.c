@@ -15,6 +15,8 @@
 #define BOX_TYPE_HDLR 0x68646C72 // 'hdlr'
 #define BOX_TYPE_AVCC 0x61766343 // 'avcC'
 #define BOX_TYPE_STSD 0x73747364 // 'stsd'
+#define BOX_TYPE_MDHD 0x6D646864 // 'mdhd'
+#define BOX_TYPE_STSC 0x73747363 // 'stsc'
 
 // Define handler type constants
 #define HANDLER_TYPE_VIDEO 0x76696465 // 'vide'
@@ -25,6 +27,8 @@ static int parse_stsz_box(FILE *file, MP4Context *ctx, long offset);
 static int parse_stco_box(FILE *file, MP4Context *ctx, long offset);
 static int parse_avcC_box(FILE *file, MP4Context *ctx, long offset);
 static int parse_video_info(FILE *file, MP4Context *ctx, long stsd_offset);
+static int parse_mdhd_box(FILE *file, MP4Context *ctx, long offset);
+static int parse_stsc_box(FILE *file, MP4Context *ctx, long offset);
 
 // Add these at the top after includes
 #define DEBUG_LOG(fmt, ...)                                \
@@ -154,6 +158,7 @@ static TrackType parse_hdlr_box(FILE *file, long offset)
 // Parse sample size box
 static int parse_stsz_box(FILE *file, MP4Context *ctx, long offset)
 {
+    DEBUG_LOG("Parsing stsz box at offset %ld", offset);
     fseek(file, offset + 8, SEEK_SET); // Skip box header
     fseek(file, 4, SEEK_CUR);          // Skip version and flags
 
@@ -175,19 +180,21 @@ static int parse_stsz_box(FILE *file, MP4Context *ctx, long offset)
 
     if (sample_size == 0)
     {
-        DEBUG_LOG("Variable sample sizes detected");
-        // Variable sample sizes
+        DEBUG_LOG("Variable sample sizes:");
         for (uint32_t i = 0; i < ctx->sample_count; i++)
         {
             if (fread(&ctx->sample_sizes[i], sizeof(uint32_t), 1, file) != 1)
                 return -1;
             ctx->sample_sizes[i] = ntohl(ctx->sample_sizes[i]);
+            if (i < 10)
+            { // Print first 10 sizes
+                DEBUG_LOG("  Sample[%u]: size=%u", i, ctx->sample_sizes[i]);
+            }
         }
     }
     else
     {
         DEBUG_LOG("Fixed sample size: %u", sample_size);
-        // Fixed sample size
         for (uint32_t i = 0; i < ctx->sample_count; i++)
         {
             ctx->sample_sizes[i] = sample_size;
@@ -200,6 +207,7 @@ static int parse_stsz_box(FILE *file, MP4Context *ctx, long offset)
 // Parse chunk offset box
 static int parse_stco_box(FILE *file, MP4Context *ctx, long offset)
 {
+    DEBUG_LOG("Parsing stco box at offset %ld", offset);
     fseek(file, offset + 8, SEEK_SET); // Skip box header
     fseek(file, 4, SEEK_CUR);          // Skip version and flags
 
@@ -207,17 +215,25 @@ static int parse_stco_box(FILE *file, MP4Context *ctx, long offset)
     if (fread(&entry_count, sizeof(uint32_t), 1, file) != 1)
         return -1;
     entry_count = ntohl(entry_count);
+    DEBUG_LOG("Chunk count: %u", entry_count);
 
-    ctx->sample_offsets = malloc(entry_count * sizeof(uint64_t));
-    if (!ctx->sample_offsets)
+    ctx->chunk_offsets = malloc(entry_count * sizeof(uint64_t));
+    if (!ctx->chunk_offsets)
         return -1;
+    ctx->chunk_count = entry_count; // Set the chunk count
 
+    DEBUG_LOG("Chunk offsets:");
     for (uint32_t i = 0; i < entry_count; i++)
     {
         uint32_t chunk_offset;
         if (fread(&chunk_offset, sizeof(uint32_t), 1, file) != 1)
             return -1;
-        ctx->sample_offsets[i] = ntohl(chunk_offset);
+        ctx->chunk_offsets[i] = ntohl(chunk_offset);
+        if (i < 10)
+        { // Print first 10 offsets
+            DEBUG_LOG("  Chunk[%u]: offset=%llu", i,
+                      (unsigned long long)ctx->chunk_offsets[i]);
+        }
     }
 
     return 0;
@@ -247,12 +263,12 @@ static int parse_avcC_box(FILE *file, MP4Context *ctx, long offset)
     DEBUG_LOG("H.264 Profile: %u, Compatibility: %u, Level: %u",
               profile, compatibility, level);
 
-    // Skip length size minus one
-    uint8_t length_size;
-    if (fread(&length_size, 1, 1, file) != 1)
+    // Read length size minus one
+    uint8_t length_size_minus_one;
+    if (fread(&length_size_minus_one, 1, 1, file) != 1)
         return -1;
-    length_size = (length_size & 0x03) + 1;
-    DEBUG_LOG("NAL length size: %u bytes", length_size);
+    ctx->h264_params.nal_length_size = (length_size_minus_one & 0x03) + 1;
+    DEBUG_LOG("NAL length size: %u bytes", ctx->h264_params.nal_length_size);
 
     // Read number of SPS
     uint8_t num_sps;
@@ -586,7 +602,79 @@ MP4Box *find_next_box_by_type(MP4Box *current, uint32_t type)
     return NULL;
 }
 
-// Update mp4_open to use these functions
+// Add timescale parsing from mdhd box
+static int parse_mdhd_box(FILE *file, MP4Context *ctx, long offset)
+{
+    DEBUG_LOG("Parsing mdhd box at offset %ld", offset);
+
+    fseek(file, offset + 8, SEEK_SET); // Skip box header
+
+    uint8_t version;
+    if (fread(&version, 1, 1, file) != 1)
+        return -1;
+
+    fseek(file, 3, SEEK_CUR); // Skip flags
+
+    if (version == 1)
+    {
+        fseek(file, 16, SEEK_CUR); // Skip creation_time and modification_time
+    }
+    else
+    {
+        fseek(file, 8, SEEK_CUR); // Skip creation_time and modification_time
+    }
+
+    uint32_t timescale;
+    if (fread(&timescale, 4, 1, file) != 1)
+        return -1;
+    ctx->timescale = ntohl(timescale);
+
+    DEBUG_LOG("Media timescale: %u", ctx->timescale);
+    return 0;
+}
+
+// Add chunk-to-sample box parsing
+static int parse_stsc_box(FILE *file, MP4Context *ctx, long offset)
+{
+    DEBUG_LOG("Parsing stsc box at offset %ld", offset);
+    fseek(file, offset + 8, SEEK_SET); // Skip box header
+    fseek(file, 4, SEEK_CUR);          // Skip version and flags
+
+    uint32_t entry_count;
+    if (fread(&entry_count, sizeof(uint32_t), 1, file) != 1)
+        return -1;
+    entry_count = ntohl(entry_count);
+
+    DEBUG_LOG("Chunk-to-sample entries: %u", entry_count);
+
+    ctx->stsc_entries = malloc(entry_count * sizeof(ChunkToSampleEntry));
+    if (!ctx->stsc_entries)
+        return -1;
+    ctx->stsc_entry_count = entry_count;
+
+    for (uint32_t i = 0; i < entry_count; i++)
+    {
+        if (fread(&ctx->stsc_entries[i].first_chunk, sizeof(uint32_t), 1, file) != 1)
+            return -1;
+        if (fread(&ctx->stsc_entries[i].samples_per_chunk, sizeof(uint32_t), 1, file) != 1)
+            return -1;
+        if (fread(&ctx->stsc_entries[i].sample_description_index, sizeof(uint32_t), 1, file) != 1)
+            return -1;
+
+        ctx->stsc_entries[i].first_chunk = ntohl(ctx->stsc_entries[i].first_chunk);
+        ctx->stsc_entries[i].samples_per_chunk = ntohl(ctx->stsc_entries[i].samples_per_chunk);
+        ctx->stsc_entries[i].sample_description_index = ntohl(ctx->stsc_entries[i].sample_description_index);
+
+        DEBUG_LOG("  Entry[%u]: first_chunk=%u, samples_per_chunk=%u, sample_desc_idx=%u",
+                  i, ctx->stsc_entries[i].first_chunk,
+                  ctx->stsc_entries[i].samples_per_chunk,
+                  ctx->stsc_entries[i].sample_description_index);
+    }
+
+    return 0;
+}
+
+// Update mp4_open to parse stsc box
 MP4Context *mp4_open(const char *filename)
 {
     DEBUG_LOG("Opening file: %s", filename);
@@ -633,42 +721,61 @@ MP4Context *mp4_open(const char *filename)
     while (trak)
     {
         // Parse track info
-        MP4Box *hdlr = find_box_by_type(trak, BOX_TYPE_HDLR);
-        if (hdlr)
+        MP4Box *mdia = find_box_by_type(trak, BOX_TYPE_MDIA);
+        if (mdia)
         {
-            ctx->track_type = parse_hdlr_box(file, hdlr->offset);
-            if (ctx->track_type == TRACK_TYPE_VIDEO)
+            MP4Box *mdhd = find_box_by_type(mdia, BOX_TYPE_MDHD);
+            if (mdhd && parse_mdhd_box(file, ctx, mdhd->offset) != 0)
             {
-                // Parse video specific boxes
-                MP4Box *stsd = find_box_by_type(trak, BOX_TYPE_STSD);
-                if (stsd && parse_video_info(file, ctx, stsd->offset) != 0)
-                {
-                    DEBUG_LOG("Failed to parse video info");
-                    goto error;
-                }
+                DEBUG_LOG("Failed to parse mdhd box");
+                goto error;
+            }
 
-                // Parse sample information
-                MP4Box *stbl = find_box_by_type(trak, BOX_TYPE_STBL);
-                if (stbl)
+            MP4Box *hdlr = find_box_by_type(mdia, BOX_TYPE_HDLR);
+            if (hdlr)
+            {
+                ctx->track_type = parse_hdlr_box(file, hdlr->offset);
+                if (ctx->track_type == TRACK_TYPE_VIDEO)
                 {
-                    MP4Box *stsz = find_box_by_type(stbl, BOX_TYPE_STSZ);
-                    if (stsz && parse_stsz_box(file, ctx, stsz->offset) != 0)
+                    // Parse video specific boxes
+                    MP4Box *stbl = find_box_by_type(mdia, BOX_TYPE_STBL);
+                    if (stbl)
                     {
-                        DEBUG_LOG("Failed to parse stsz box");
-                        goto error;
-                    }
+                        // Parse sample description box for video parameters
+                        MP4Box *stsd = find_box_by_type(stbl, BOX_TYPE_STSD);
+                        if (stsd && parse_video_info(file, ctx, stsd->offset) != 0)
+                        {
+                            DEBUG_LOG("Failed to parse video info");
+                            goto error;
+                        }
 
-                    MP4Box *stco = find_box_by_type(stbl, BOX_TYPE_STCO);
-                    if (stco && parse_stco_box(file, ctx, stco->offset) != 0)
-                    {
-                        DEBUG_LOG("Failed to parse stco box");
-                        goto error;
+                        // Parse sample size box
+                        MP4Box *stsz = find_box_by_type(stbl, BOX_TYPE_STSZ);
+                        if (stsz && parse_stsz_box(file, ctx, stsz->offset) != 0)
+                        {
+                            DEBUG_LOG("Failed to parse stsz box");
+                            goto error;
+                        }
+
+                        // Parse chunk offset box
+                        MP4Box *stco = find_box_by_type(stbl, BOX_TYPE_STCO);
+                        if (stco && parse_stco_box(file, ctx, stco->offset) != 0)
+                        {
+                            DEBUG_LOG("Failed to parse stco box");
+                            goto error;
+                        }
+
+                        // Parse chunk-to-sample box
+                        MP4Box *stsc = find_box_by_type(stbl, BOX_TYPE_STSC);
+                        if (stsc && parse_stsc_box(file, ctx, stsc->offset) != 0)
+                        {
+                            DEBUG_LOG("Failed to parse stsc box");
+                            goto error;
+                        }
                     }
                 }
             }
         }
-
-        // Get next track
         trak = find_next_box_by_type(trak, BOX_TYPE_TRAK);
     }
 
@@ -690,10 +797,12 @@ void mp4_close(MP4Context *ctx)
     {
         if (ctx->file)
             fclose(ctx->file);
-        if (ctx->sample_offsets)
-            free(ctx->sample_offsets);
+        if (ctx->chunk_offsets)
+            free(ctx->chunk_offsets);
         if (ctx->sample_sizes)
             free(ctx->sample_sizes);
+        if (ctx->stsc_entries)
+            free(ctx->stsc_entries);
         if (ctx->h264_params.sps)
             free(ctx->h264_params.sps);
         if (ctx->h264_params.pps)
@@ -702,7 +811,7 @@ void mp4_close(MP4Context *ctx)
     }
 }
 
-// Function to read next sample from MP4 file
+// Update read_next_sample to handle sample offsets correctly
 MP4Status read_next_sample(MP4Context *ctx, MP4Sample *sample)
 {
     if (!ctx || !sample)
@@ -715,20 +824,66 @@ MP4Status read_next_sample(MP4Context *ctx, MP4Sample *sample)
         return MP4_ERROR_EOF;
     }
 
+    // Find which chunk contains our sample
+    uint32_t current_chunk = 0;
+    uint32_t samples_in_previous_chunks = 0;
+    uint32_t samples_per_chunk = 0;
+
     // Validate array bounds
-    if (ctx->current_sample >= ctx->sample_count ||
-        !ctx->sample_offsets || !ctx->sample_sizes)
+    if (!ctx->chunk_offsets || !ctx->sample_sizes || !ctx->stsc_entries)
     {
         return MP4_ERROR_INVALID_PARAM;
     }
 
-    // Get sample data
-    uint64_t offset = ctx->sample_offsets[ctx->current_sample];
+    // Find the chunk that contains our sample
+    for (uint32_t i = 0; i < ctx->stsc_entry_count; i++)
+    {
+        uint32_t next_first_chunk = (i + 1 < ctx->stsc_entry_count) ? ctx->stsc_entries[i + 1].first_chunk : ctx->chunk_count + 1;
+
+        uint32_t chunks_in_this_run = next_first_chunk - ctx->stsc_entries[i].first_chunk;
+        uint32_t samples_in_this_run = chunks_in_this_run * ctx->stsc_entries[i].samples_per_chunk;
+
+        if (ctx->current_sample < samples_in_previous_chunks + samples_in_this_run)
+        {
+            // Found the right entry
+            samples_per_chunk = ctx->stsc_entries[i].samples_per_chunk;
+            uint32_t samples_into_run = ctx->current_sample - samples_in_previous_chunks;
+            uint32_t chunks_into_run = samples_into_run / samples_per_chunk;
+            current_chunk = ctx->stsc_entries[i].first_chunk - 1 + chunks_into_run;
+            break;
+        }
+
+        samples_in_previous_chunks += samples_in_this_run;
+    }
+
+    if (current_chunk >= ctx->chunk_count)
+        return MP4_ERROR_INVALID_PARAM;
+
+    // Calculate sample offset within chunk
+    uint32_t sample_offset_in_chunk =
+        (ctx->current_sample - samples_in_previous_chunks) % samples_per_chunk;
+    uint64_t chunk_offset = ctx->chunk_offsets[current_chunk];
+
+    // Calculate actual sample offset by adding up sizes of previous samples in chunk
+    uint64_t offset = chunk_offset;
+    for (uint32_t i = 0; i < sample_offset_in_chunk; i++)
+    {
+        offset += ctx->sample_sizes[ctx->current_sample - sample_offset_in_chunk + i];
+    }
+
     uint32_t size = ctx->sample_sizes[ctx->current_sample];
 
     DEBUG_LOG("Reading sample %u/%u (size: %u, offset: %llu)",
               ctx->current_sample + 1, ctx->sample_count,
               size, (unsigned long long)offset);
+
+    // Validate sample size and offset
+    if (size == 0 || offset + size > ctx->file_size)
+    {
+        DEBUG_LOG("Invalid sample size or offset: size=%u, offset=%llu, file_size=%llu",
+                  size, (unsigned long long)offset, (unsigned long long)ctx->file_size);
+        return MP4_ERROR_INVALID_PARAM;
+    }
 
     sample->data = (uint8_t *)malloc(size);
     if (!sample->data)

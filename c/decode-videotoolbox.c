@@ -6,6 +6,100 @@
 #include <CoreMedia/CoreMedia.h>
 #include <CoreVideo/CoreVideo.h>
 #include <VideoToolbox/VideoToolbox.h>
+#include <Accelerate/Accelerate.h>
+
+// Add these H.264 NAL unit type definitions
+#define H264_NAL_SLICE 1
+#define H264_NAL_IDR_SLICE 5
+#define H264_NAL_SEI 6
+#define H264_NAL_SPS 7
+#define H264_NAL_PPS 8
+#define H264_NAL_AUD 9
+
+// Add this validation function
+static int validate_h264_sample(const uint8_t *data, size_t size, uint8_t nal_length_size)
+{
+    size_t offset = 0;
+    int valid_nals_found = 0;
+
+    printf("Validating H.264 sample (size: %zu, NAL length size: %u)\n", size, nal_length_size);
+
+    while (offset + nal_length_size <= size)
+    {
+        // Read NAL unit length (assuming big-endian storage)
+        uint32_t nal_size = 0;
+        if (nal_length_size == 4)
+        {
+            // Read as a single 32-bit value
+            nal_size = (data[offset] << 24) | (data[offset + 1] << 16) |
+                       (data[offset + 2] << 8) | data[offset + 3];
+        }
+        else
+        {
+            // Fallback for other sizes
+            for (int i = 0; i < nal_length_size; i++)
+            {
+                nal_size = (nal_size << 8) | data[offset + i];
+            }
+        }
+
+        // Print the raw bytes for debugging
+        printf("NAL length bytes at offset %zu: ", offset);
+        for (int i = 0; i < nal_length_size; i++)
+        {
+            printf("%02x ", data[offset + i]);
+        }
+        printf("-> size=%u\n", nal_size);
+
+        // Validate NAL unit size
+        if (nal_size == 0 || offset + nal_length_size + nal_size > size)
+        {
+            printf("Invalid NAL unit size: %u at offset %zu (total size: %zu)\n",
+                   nal_size, offset, size);
+            return 0;
+        }
+
+        // Get NAL unit type
+        uint8_t nal_type = data[offset + nal_length_size] & 0x1F;
+        printf("NAL unit at offset %zu: size=%u, type=%u\n", offset, nal_size, nal_type);
+
+        // Validate NAL unit type
+        switch (nal_type)
+        {
+        case H264_NAL_SLICE:
+        case H264_NAL_IDR_SLICE:
+        case H264_NAL_SEI:
+        case H264_NAL_SPS:
+        case H264_NAL_PPS:
+        case H264_NAL_AUD:
+            valid_nals_found++;
+            break;
+        default:
+            printf("Warning: Unknown NAL unit type: %u\n", nal_type);
+            break;
+        }
+
+        // Move to next NAL unit
+        offset += nal_length_size + nal_size;
+    }
+
+    // Check if we found any valid NAL units
+    if (valid_nals_found == 0)
+    {
+        printf("No valid NAL units found in sample\n");
+        return 0;
+    }
+
+    // Check if we consumed exactly all bytes
+    if (offset != size)
+    {
+        printf("Warning: Sample size mismatch. Consumed %zu of %zu bytes\n", offset, size);
+        return 0;
+    }
+
+    printf("Sample validation successful: found %d valid NAL units\n", valid_nals_found);
+    return 1;
+}
 
 // Callback function for handling decoded frames
 static void decoder_output_callback(void *decompressionOutputRefCon,
@@ -18,7 +112,7 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
 {
     if (status != noErr || imageBuffer == NULL)
     {
-        printf("Decoder callback error: %d\n", (int)status);
+        printf("Decoder callback error: %d (0x%x)\n", (int)status, (int)status);
         return;
     }
 
@@ -30,23 +124,89 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
     // Get the pixel buffer details
     size_t width = CVPixelBufferGetWidth(imageBuffer);
     size_t height = CVPixelBufferGetHeight(imageBuffer);
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(imageBuffer);
-    void *baseAddress = CVPixelBufferGetBaseAddress(imageBuffer);
+    // OSType pixelFormat = CVPixelBufferGetPixelFormatType(imageBuffer);
 
-    // Create a CG bitmap context
+    // Get plane data for YUV
+    uint8_t *yPlane = CVPixelBufferGetBaseAddressOfPlane(imageBuffer, 0);
+    uint8_t *uvPlane = CVPixelBufferGetBaseAddressOfPlane(imageBuffer, 1);
+    size_t yStride = CVPixelBufferGetBytesPerRowOfPlane(imageBuffer, 0);
+    size_t uvStride = CVPixelBufferGetBytesPerRowOfPlane(imageBuffer, 1);
+
+    // Create vImage buffers for conversion
+    vImage_Buffer srcY = {
+        .data = yPlane,
+        .width = width,
+        .height = height,
+        .rowBytes = yStride};
+
+    vImage_Buffer srcUV = {
+        .data = uvPlane,
+        .width = width / 2,
+        .height = height / 2,
+        .rowBytes = uvStride};
+
+    // Allocate memory for RGB output
+    uint8_t *rgbData = malloc(width * height * 4); // 4 bytes per pixel for RGBA
+    vImage_Buffer destRGB = {
+        .data = rgbData,
+        .width = width,
+        .height = height,
+        .rowBytes = width * 4};
+
+    // Setup conversion info
+    vImage_YpCbCrToARGB info;
+    vImage_YpCbCrPixelRange pixelRange = {
+        .Yp_bias = 16,
+        .CbCr_bias = 128,
+        .YpRangeMax = 235,
+        .CbCrRangeMax = 240,
+        .YpMax = 255,
+        .YpMin = 0,
+        .CbCrMax = 255,
+        .CbCrMin = 0};
+
+    vImageConvert_YpCbCrToARGB_GenerateConversion(
+        kvImage_YpCbCrToARGBMatrix_ITU_R_601_4,
+        &pixelRange,
+        &info,
+        kvImage420Yp8_CbCr8,
+        kvImageARGB8888,
+        0);
+
+    // Perform the conversion
+    vImage_Error error = vImageConvert_420Yp8_CbCr8ToARGB8888(
+        &srcY,
+        &srcUV,
+        &destRGB,
+        &info,
+        NULL,
+        255,
+        kvImageNoFlags);
+
+    if (error != kvImageNoError)
+    {
+        printf("vImage conversion error: %ld\n", error);
+        free(rgbData);
+        CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
+        return;
+    }
+
+    // Create CGImage from the RGB data
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGContextRef context = CGBitmapContextCreate(baseAddress,
-                                                 width,
-                                                 height,
-                                                 8,
-                                                 bytesPerRow,
-                                                 colorSpace,
-                                                 kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
+    CGContextRef context = CGBitmapContextCreate(
+        rgbData,
+        width,
+        height,
+        8,
+        width * 4,
+        colorSpace,
+        kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
 
     if (!context)
     {
         printf("Failed to create bitmap context\n");
         CGColorSpaceRelease(colorSpace);
+        free(rgbData);
         CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
         return;
     }
@@ -57,6 +217,7 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
         printf("Failed to create CGImage\n");
         CGContextRelease(context);
         CGColorSpaceRelease(colorSpace);
+        free(rgbData);
         CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
         return;
     }
@@ -96,6 +257,7 @@ static void decoder_output_callback(void *decompressionOutputRefCon,
     CGImageRelease(cgImage);
     CGContextRelease(context);
     CGColorSpaceRelease(colorSpace);
+    free(rgbData);
 
     // Unlock the buffer
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
@@ -127,7 +289,7 @@ DecoderStatus init_decoder(VideoDecoder *decoder,
         2, // parameter set count
         parameterSetPointers,
         parameterSetSizes,
-        4, // NAL length size
+        mp4_ctx->h264_params.nal_length_size,
         &decoder->format_desc);
 
     if (status != noErr)
@@ -142,7 +304,7 @@ DecoderStatus init_decoder(VideoDecoder *decoder,
         &kCFTypeDictionaryValueCallBacks);
 
     // Set video decoder specifications
-    int32_t pixel_format = kCVPixelFormatType_32BGRA;
+    int32_t pixel_format = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
     CFNumberRef pixel_format_ref = CFNumberCreate(NULL, kCFNumberSInt32Type, &pixel_format);
     CFDictionarySetValue(decoder_spec,
                          kCVPixelBufferPixelFormatTypeKey,
@@ -181,6 +343,25 @@ DecoderStatus decode_frame(VideoDecoder *decoder, const uint8_t *data, size_t si
 {
     if (!decoder || !data || size == 0)
     {
+        return DECODER_ERROR_DECODE;
+    }
+
+    // Get NAL length size from format description
+    int nal_length_size = 4; // Default to 4
+    CFDictionaryRef extensions = CMFormatDescriptionGetExtensions(decoder->format_desc);
+    if (extensions)
+    {
+        CFNumberRef length_ref = CFDictionaryGetValue(extensions, CFSTR("NALUnitLength"));
+        if (length_ref)
+        {
+            CFNumberGetValue(length_ref, kCFNumberIntType, &nal_length_size);
+        }
+    }
+
+    // Validate H.264 sample
+    if (!validate_h264_sample(data, size, nal_length_size))
+    {
+        printf("H.264 sample validation failed\n");
         return DECODER_ERROR_DECODE;
     }
 
