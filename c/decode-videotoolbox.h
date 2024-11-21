@@ -7,7 +7,6 @@
 #include <ImageIO/ImageIO.h>
 #include <CoreVideo/CVBuffer.h>
 #include "common.h"
-#include "mp4.h"
 
 // Structure to hold decoder context
 typedef struct {
@@ -17,8 +16,11 @@ typedef struct {
     int frame_count;
 } VideoDecoder;
 
-// Initialize the decoder
-DecoderStatus init_decoder(VideoDecoder* decoder, const char* output_directory, MP4Context* mp4_ctx);
+// Initialize the decoder with H.264 parameters
+DecoderStatus init_decoder(VideoDecoder* decoder, 
+                         const char* output_directory,
+                         const uint8_t* sps, size_t sps_size,
+                         const uint8_t* pps, size_t pps_size);
 
 // Decode a video frame
 DecoderStatus decode_frame(VideoDecoder* decoder, const uint8_t* data, size_t size, CMTime pts);

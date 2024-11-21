@@ -1,5 +1,4 @@
 #include "decode-videotoolbox.h"
-#include "mp4.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,8 +96,11 @@ static void decoder_output_callback(void* decompressionOutputRefCon,
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
 }
 
-DecoderStatus init_decoder(VideoDecoder* decoder, const char* output_directory, MP4Context* mp4_ctx) {
-    if (!decoder || !output_directory || !mp4_ctx) {
+DecoderStatus init_decoder(VideoDecoder* decoder, 
+                         const char* output_directory,
+                         const uint8_t* sps, size_t sps_size,
+                         const uint8_t* pps, size_t pps_size) {
+    if (!decoder || !output_directory || !sps || !pps) {
         return DECODER_ERROR_INIT;
     }
 
@@ -106,9 +108,9 @@ DecoderStatus init_decoder(VideoDecoder* decoder, const char* output_directory, 
     decoder->output_directory = strdup(output_directory);
     decoder->frame_count = 0;
 
-    // Create format description using SPS/PPS from MP4Context
-    const uint8_t* parameterSetPointers[2] = { mp4_ctx->sps, mp4_ctx->pps };
-    const size_t parameterSetSizes[2] = { mp4_ctx->sps_size, mp4_ctx->pps_size };
+    // Create format description using provided SPS/PPS
+    const uint8_t* parameterSetPointers[2] = { sps, pps };
+    const size_t parameterSetSizes[2] = { sps_size, pps_size };
     
     OSStatus status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
         kCFAllocatorDefault,
@@ -157,6 +159,10 @@ DecoderStatus init_decoder(VideoDecoder* decoder, const char* output_directory, 
         printf("Failed to create decompression session: %d\n", (int)status);
         return DECODER_ERROR_INIT;
     }
+    
+    // Print video information
+    CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(decoder->format_desc);
+    printf("Created decoder for video: %dx%d\n", dimensions.width, dimensions.height);
     
     return DECODER_SUCCESS;
 }
