@@ -225,53 +225,113 @@ static int parse_stco_box(FILE *file, MP4Context *ctx, long offset)
 
 static int parse_avcC_box(FILE *file, MP4Context *ctx, long offset)
 {
+    DEBUG_LOG("Parsing avcC box at offset %ld", offset);
+
     fseek(file, offset + 8, SEEK_SET); // Skip box header
 
-    // Skip configuration version and profile
-    fseek(file, 1 + 3, SEEK_CUR);
+    // Read configuration version
+    uint8_t version;
+    if (fread(&version, 1, 1, file) != 1)
+        return -1;
+    DEBUG_LOG("avcC version: %u", version);
 
-    // Read SPS
+    // Read profile, compatibility, and level
+    uint8_t profile, compatibility, level;
+    if (fread(&profile, 1, 1, file) != 1)
+        return -1;
+    if (fread(&compatibility, 1, 1, file) != 1)
+        return -1;
+    if (fread(&level, 1, 1, file) != 1)
+        return -1;
+
+    DEBUG_LOG("H.264 Profile: %u, Compatibility: %u, Level: %u",
+              profile, compatibility, level);
+
+    // Skip length size minus one
+    uint8_t length_size;
+    if (fread(&length_size, 1, 1, file) != 1)
+        return -1;
+    length_size = (length_size & 0x03) + 1;
+    DEBUG_LOG("NAL length size: %u bytes", length_size);
+
+    // Read number of SPS
     uint8_t num_sps;
     if (fread(&num_sps, 1, 1, file) != 1)
         return -1;
     num_sps &= 0x1F; // Lower 5 bits
+    DEBUG_LOG("Number of SPS: %u", num_sps);
 
     if (num_sps > 0)
     {
+        // Read SPS length
         uint16_t sps_size;
         if (fread(&sps_size, 2, 1, file) != 1)
             return -1;
         sps_size = ntohs(sps_size);
+        DEBUG_LOG("SPS size: %u bytes", sps_size);
 
+        // Validate SPS size
+        if (sps_size == 0 || sps_size > 1024)
+        { // reasonable maximum size
+            DEBUG_LOG("Invalid SPS size: %u", sps_size);
+            return -1;
+        }
+
+        // Allocate and read SPS
         ctx->h264_params.sps = malloc(sps_size);
         if (!ctx->h264_params.sps)
             return -1;
 
         if (fread(ctx->h264_params.sps, 1, sps_size, file) != sps_size)
+        {
+            DEBUG_LOG("Failed to read SPS data");
+            free(ctx->h264_params.sps);
+            ctx->h264_params.sps = NULL;
             return -1;
+        }
         ctx->h264_params.sps_size = sps_size;
     }
 
-    // Read PPS
+    // Read number of PPS
     uint8_t num_pps;
     if (fread(&num_pps, 1, 1, file) != 1)
         return -1;
+    DEBUG_LOG("Number of PPS: %u", num_pps);
 
     if (num_pps > 0)
     {
+        // Read PPS length
         uint16_t pps_size;
         if (fread(&pps_size, 2, 1, file) != 1)
             return -1;
         pps_size = ntohs(pps_size);
+        DEBUG_LOG("PPS size: %u bytes", pps_size);
 
+        // Validate PPS size
+        if (pps_size == 0 || pps_size > 1024)
+        { // reasonable maximum size
+            DEBUG_LOG("Invalid PPS size: %u", pps_size);
+            return -1;
+        }
+
+        // Allocate and read PPS
         ctx->h264_params.pps = malloc(pps_size);
         if (!ctx->h264_params.pps)
             return -1;
 
         if (fread(ctx->h264_params.pps, 1, pps_size, file) != pps_size)
+        {
+            DEBUG_LOG("Failed to read PPS data");
+            free(ctx->h264_params.pps);
+            ctx->h264_params.pps = NULL;
             return -1;
+        }
         ctx->h264_params.pps_size = pps_size;
     }
+
+    DEBUG_LOG("Successfully parsed avcC box: SPS size=%zu, PPS size=%zu",
+              ctx->h264_params.sps_size,
+              ctx->h264_params.pps_size);
 
     return 0;
 }
